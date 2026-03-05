@@ -1,0 +1,5 @@
+{
+  "name": "Founder Copilot",
+  "description": "Your AI Co-Founder that builds startups with you. Validate ideas, create pitch decks, design logos, and generate marketing content.",
+  "requestFramePermissions": ["microphone"]
+}
