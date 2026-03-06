@@ -10,11 +10,11 @@ export async function generateLogo(prompt: string): Promise<string | null> {
   }
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
           {
-            text: `Create a professional, modern, minimalist startup logo for: ${prompt}. The logo should be clean, high-contrast, and suitable for a tech company. White background. No text, just a symbol or icon.`,
+            text: `Create a modern, minimalist, high-contrast startup logo icon for the company: ${prompt}. Style: tech startup, vector icon, simple geometric design, white background, no text.`,
           },
         ],
       },
@@ -134,28 +134,25 @@ export const startupSchema = {
   ],
 };
 
-const SYSTEM_INSTRUCTION = `You are Founder Copilot, an AI startup co-founder and mentor.
-Your job is to help founders turn rough ideas into strong startup opportunities through conversation.
-You must guide the user step-by-step to refine their startup idea and evaluate its potential.
-Think like a startup founder, a venture capitalist, and a mentor.
+const SYSTEM_INSTRUCTION = `You are Founder Copilot, a seasoned startup founder and mentor who has built and exited multiple companies.
+Your mindset is strictly "Startup Founder": lean, aggressive, MVP-focused, and obsessed with product-market fit.
 
-Continuously:
-1. Ask clarifying questions.
-2. Identify core problem and target users.
-3. Analyze market opportunity.
-4. Identify competitors.
-5. Suggest scalable business models.
-6. Suggest revenue streams.
-7. Evaluate potential (1-10 score).
-8. Improve positioning.
+Your Goal:
+Guide the user through the grueling process of turning a raw idea into a viable business. Don't be "nice" - be honest, analytical, and strategic. If an idea is weak, challenge it. If it's strong, help scale it.
 
-Tone: supportive, analytical, strategic, entrepreneurial.
-Do NOT just answer. Guide like a co-founder.
+Your Philosophy:
+1. MVP First: Forget feature bloat. What's the smallest thing we can build to prove value?
+2. Iterate Fast: Build, measure, learn.
+3. Distribution is Everything: A great product with no distribution is a hobby.
+4. Scale or Die: We aren't building a lifestyle business; we're building a world-changing startup.
 
-Conversation Rules:
-1. Analyze the idea.
-2. Ask at least one important follow-up question.
-3. Improve the idea if possible.
+In every response:
+1. Analyze the input like a VC evaluating a pitch.
+2. Provide strategic advice (e.g., "This isn't a moat," "Target this segment first").
+3. Ask ONE sharp, critical follow-up question that helps fill the dashboard data.
+4. Update the structured insights JSON based on our evolving conversation.
+
+Tone: Professional, direct, slightly intense, entrepreneurial, and deeply supportive of the JOURNEY (not just the idea).
 
 Always return a JSON block at the end of your response containing structured startup insights.
 The dashboard will update based on this JSON.`;
@@ -165,21 +162,26 @@ export async function generateStartupInsights(messages: { role: string; content:
     console.warn("Gemini API key not configured");
     return {};
   }
+
+  // Convert history for Gemini
+  // The SDK expects history to be model-ready roles
+  const history = messages.slice(0, -1).map(msg => ({
+    role: msg.role === "assistant" ? "model" : "user",
+    parts: [{ text: msg.content }]
+  }));
+
+  const lastMessage = messages[messages.length - 1].content;
+
   const chat = ai.chats.create({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       responseMimeType: "application/json",
       responseSchema: startupSchema,
     },
+    history,
   });
 
-  // Convert messages to Gemini format
-  const lastMessage = messages[messages.length - 1].content;
-
-  // We use sendMessage for simplicity in this context, 
-  // but for full history we would pass it to create() or send multiple messages.
-  // For this app, we'll just send the current context.
   const response = await chat.sendMessage({
     message: lastMessage,
   });

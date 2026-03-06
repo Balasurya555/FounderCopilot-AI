@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
-import { 
-  LayoutDashboard, 
-  Lightbulb, 
-  Presentation, 
-  Palette, 
-  Megaphone, 
-  UserCircle, 
-  Settings, 
-  Search, 
-  Bell, 
+import {
+  LayoutDashboard,
+  Lightbulb,
+  Presentation,
+  Palette,
+  Megaphone,
+  UserCircle,
+  Settings,
+  Search,
+  Bell,
   Plus,
   Send,
   Mic,
@@ -31,7 +31,9 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("Dashboard");
   const [messages, setMessages] = useState(MOCK_MESSAGES);
   const [startupData, setStartupData] = useState<StartupData | null>(null);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [startupLogo, setStartupLogo] = useState<string | null>(null);
+  const [hasUploadedLogo, setHasUploadedLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const [isGeneratingLogo, setIsGeneratingLogo] = useState(false);
   const [logoEditPrompt, setLogoEditPrompt] = useState("");
   const [inputValue, setInputValue] = useState("");
@@ -39,24 +41,34 @@ export default function DashboardPage() {
   const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
-    if (startupData && !logoUrl && !isGeneratingLogo) {
+    if (startupData?.startup_name && !startupLogo && !isGeneratingLogo && !hasUploadedLogo) {
       handleGenerateLogo();
     }
-  }, [startupData]);
+  }, [startupData?.startup_name, startupLogo, isGeneratingLogo, hasUploadedLogo]);
 
   const handleGenerateLogo = async () => {
-    if (!startupData) return;
+    if (!startupData?.startup_name || hasUploadedLogo) return;
     setIsGeneratingLogo(true);
-    const url = await generateLogo(`${startupData.startup_name} - ${startupData.unique_advantage}`);
-    setLogoUrl(url);
+    setLogoError(null);
+    try {
+      const url = await generateLogo(startupData.startup_name);
+      if (url) {
+        setStartupLogo(url);
+      } else {
+        setLogoError("Logo generation failed. Please try again.");
+      }
+    } catch (error) {
+      console.error("Logo generation error:", error);
+      setLogoError("Logo generation failed. Please try again.");
+    }
     setIsGeneratingLogo(false);
   };
 
   const handleEditLogo = async () => {
-    if (!logoUrl || !logoEditPrompt.trim()) return;
+    if (!startupLogo || !logoEditPrompt.trim()) return;
     setIsGeneratingLogo(true);
-    const url = await editLogo(logoUrl, logoEditPrompt);
-    if (url) setLogoUrl(url);
+    const url = await editLogo(startupLogo, logoEditPrompt);
+    if (url) setStartupLogo(url);
     setLogoEditPrompt("");
     setIsGeneratingLogo(false);
   };
@@ -64,7 +76,7 @@ export default function DashboardPage() {
   const handleSend = async (text?: string) => {
     const messageText = text || inputValue;
     if (!messageText.trim()) return;
-    
+
     const userMsg = { role: "user", content: messageText };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -74,20 +86,20 @@ export default function DashboardPage() {
     try {
       const insights = await generateStartupInsights(newMessages);
       setIsTyping(false);
-      
-      const aiMsg = { 
-        role: "assistant", 
+
+      const aiMsg = {
+        role: "assistant",
         content: insights.chat_response || insights.next_question_for_founder || "I've updated the dashboard with my latest analysis. What do you think?",
-        data: insights 
+        data: insights
       };
       setMessages(prev => [...prev, aiMsg]);
       setStartupData(insights);
     } catch (error) {
       console.error("AI Error:", error);
       setIsTyping(false);
-      setMessages(prev => [...prev, { 
-        role: "assistant", 
-        content: "I encountered an error while analyzing your idea. Please try again." 
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "I encountered an error while analyzing your idea. Please try again."
       }]);
     }
   };
@@ -147,8 +159,8 @@ export default function DashboardPage() {
               onClick={() => setActiveTab(item.label)}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all",
-                activeTab === item.label 
-                  ? "bg-indigo-50 text-indigo-600" 
+                activeTab === item.label
+                  ? "bg-indigo-50 text-indigo-600"
                   : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               )}
             >
@@ -159,7 +171,7 @@ export default function DashboardPage() {
         </nav>
 
         <div className="p-4 mt-auto border-t border-slate-100">
-          <button 
+          <button
             onClick={handleSettings}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition-all"
           >
@@ -169,7 +181,7 @@ export default function DashboardPage() {
           <div className="mt-4 p-3 bg-slate-900 rounded-2xl text-white">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Pro Plan</p>
             <p className="text-sm font-medium mb-3">Unlock unlimited AI generations</p>
-            <button 
+            <button
               onClick={handleUpgrade}
               className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 rounded-xl text-xs font-bold transition-all"
             >
@@ -185,14 +197,14 @@ export default function DashboardPage() {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center gap-4 bg-slate-100 px-4 py-2 rounded-full w-96">
             <Search className="w-4 h-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search projects, assets..." 
+            <input
+              type="text"
+              placeholder="Search projects, assets..."
               className="bg-transparent border-none focus:ring-0 text-sm w-full placeholder:text-slate-400"
             />
           </div>
           <div className="flex items-center gap-4">
-            <button 
+            <button
               onClick={handleNotifications}
               className="p-2 text-slate-400 hover:text-slate-600 relative"
             >
@@ -235,13 +247,13 @@ export default function DashboardPage() {
                       <p className="text-slate-500 mt-1">{startupData.idea_summary}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button 
+                      <button
                         onClick={handleExport}
                         className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all flex items-center gap-2"
                       >
                         Export PDF <ChevronRight className="w-4 h-4" />
                       </button>
-                      <button 
+                      <button
                         onClick={handleShare}
                         className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
                       >
@@ -284,7 +296,7 @@ export default function DashboardPage() {
                               ))}
                             </div>
                           </div>
-                          
+
                           <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
                             <h3 className="text-xl font-bold mb-6">Business Model Canvas</h3>
                             <div className="grid grid-cols-5 gap-2 text-[8px] font-bold uppercase tracking-tighter">
@@ -382,10 +394,10 @@ export default function DashboardPage() {
                           <div className="flex-1">
                             <h3 className="text-xl font-bold mb-2">Logo Concept</h3>
                             <p className="text-indigo-100 text-sm mb-6">AI-generated based on your unique advantage: "{startupData.unique_advantage}"</p>
-                            
+
                             <div className="space-y-4">
                               <div className="relative">
-                                <input 
+                                <input
                                   type="text"
                                   value={logoEditPrompt}
                                   onChange={(e) => setLogoEditPrompt(e.target.value)}
@@ -393,7 +405,7 @@ export default function DashboardPage() {
                                   placeholder="Edit logo (e.g. 'Make it blue')"
                                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm placeholder:text-indigo-200 focus:outline-none focus:ring-1 focus:ring-white/50"
                                 />
-                                <button 
+                                <button
                                   onClick={handleEditLogo}
                                   disabled={isGeneratingLogo || !logoEditPrompt.trim()}
                                   className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white disabled:opacity-30"
@@ -401,7 +413,7 @@ export default function DashboardPage() {
                                   <ChevronRight className="w-5 h-5" />
                                 </button>
                               </div>
-                              <button 
+                              <button
                                 onClick={handleGenerateLogo}
                                 disabled={isGeneratingLogo}
                                 className="w-full py-3 bg-white text-indigo-600 rounded-2xl text-sm font-bold hover:bg-indigo-50 transition-all disabled:opacity-50"
@@ -410,17 +422,67 @@ export default function DashboardPage() {
                               </button>
                             </div>
                           </div>
-                          
-                          <div className="w-48 h-48 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center shrink-0 overflow-hidden border border-white/30">
+
+                          <div className="w-48 h-48 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center shrink-0 overflow-hidden border border-white/30 relative group">
                             {isGeneratingLogo ? (
                               <div className="flex flex-col items-center gap-2">
-                                <Sparkles className="w-10 h-10 animate-pulse" />
-                                <span className="text-xs font-bold uppercase tracking-widest">Designing...</span>
+                                <Sparkles className="w-10 h-10 animate-pulse text-white" />
+                                <span className="text-xs font-bold uppercase tracking-widest text-white">Generating brand identity...</span>
                               </div>
-                            ) : logoUrl ? (
-                              <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : startupLogo ? (
+                              <>
+                                <img src={startupLogo} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-xs font-bold uppercase tracking-widest text-white">
+                                  Change Logo
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const reader = new FileReader();
+                                        reader.onload = (rev) => {
+                                          setStartupLogo(rev.target?.result as string);
+                                          setHasUploadedLogo(true);
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </>
+                            ) : logoError ? (
+                              <div className="flex flex-col items-center gap-2 p-4 text-center">
+                                <span className="text-xs font-bold text-white/80">{logoError}</span>
+                                <button
+                                  onClick={handleGenerateLogo}
+                                  className="text-[10px] font-bold uppercase tracking-widest underline text-white"
+                                >
+                                  Try Again
+                                </button>
+                              </div>
                             ) : (
-                              <span className="text-6xl font-black tracking-tighter">{startupData.startup_name.substring(0, 2).toUpperCase()}</span>
+                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-white/10 transition-colors">
+                                <span className="text-6xl font-black tracking-tighter text-white">{startupData.startup_name.substring(0, 2).toUpperCase()}</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest mt-2 text-white/60">Upload Logo</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onload = (rev) => {
+                                        setStartupLogo(rev.target?.result as string);
+                                        setHasUploadedLogo(true);
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                />
+                              </label>
                             )}
                           </div>
                         </div>
@@ -430,6 +492,19 @@ export default function DashboardPage() {
                       <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                         <h3 className="text-xl font-bold mb-2">Brand Identity</h3>
                         <p className="text-slate-500 text-sm mb-6">Visual guidelines generated for {startupData.startup_name}</p>
+                        <div className="flex items-center gap-4 mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          {startupLogo ? (
+                            <img src={startupLogo} alt="Small Logo" className="w-12 h-12 rounded-lg object-cover" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center font-bold text-indigo-600">
+                              {startupData.startup_name.substring(0, 2).toUpperCase()}
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-sm font-bold">{startupData.startup_name}</p>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Brand Mark</p>
+                          </div>
+                        </div>
                         <div className="grid grid-cols-2 gap-4 flex-1">
                           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Primary Color</p>
@@ -491,7 +566,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {[
                           { label: "Risk Level", value: "Medium", color: "text-orange-600" },
@@ -517,13 +592,13 @@ export default function DashboardPage() {
                     Tell me your startup idea in the chat, or upload a rough business plan to get started. I'll help you with everything from market research to pitch decks.
                   </p>
                   <div className="grid grid-cols-2 gap-4 mt-10 w-full">
-                    <button 
+                    <button
                       onClick={() => handleSend("I want to build a SaaS for SME logistics")}
                       className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
                     >
                       "I want to build a SaaS for..."
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleSend("Validate my idea for a quick commerce logistics startup")}
                       className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
                     >
@@ -539,7 +614,7 @@ export default function DashboardPage() {
           <div className="w-[400px] border-l border-slate-200 bg-white flex flex-col shrink-0">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-bold text-slate-900">AI Co-Founder</h2>
-              <button 
+              <button
                 onClick={clearChat}
                 className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg"
               >
@@ -555,8 +630,8 @@ export default function DashboardPage() {
                 )}>
                   <div className={cn(
                     "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed",
-                    msg.role === "user" 
-                      ? "bg-indigo-600 text-white rounded-tr-none" 
+                    msg.role === "user"
+                      ? "bg-indigo-600 text-white rounded-tr-none"
                       : "bg-slate-100 text-slate-800 rounded-tl-none"
                   )}>
                     {msg.content}
@@ -590,7 +665,7 @@ export default function DashboardPage() {
                   )}
                 />
                 <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                  <button 
+                  <button
                     onClick={toggleMic}
                     className={cn(
                       "p-2 transition-colors",
@@ -599,7 +674,7 @@ export default function DashboardPage() {
                   >
                     <Mic className="w-5 h-5" />
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleSend()}
                     className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
                   >
