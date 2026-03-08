@@ -99,7 +99,7 @@ export default function DashboardPage() {
       setIsTyping(false);
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: "I encountered an error while analyzing your idea. Please try again."
+        content: `I encountered an error while analyzing your idea. Please try again. ${error.message || ''}`
       }]);
     }
   };
