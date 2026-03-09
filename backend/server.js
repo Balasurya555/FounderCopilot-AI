@@ -1,10 +1,11 @@
-const express = require("express");
-const cors = require("cors");
 const dotenv = require("dotenv");
-const { GoogleGenAI, Type } = require("@google/genai");
 
 // Load local .env variables
 dotenv.config();
+
+const express = require("express");
+const cors = require("cors");
+const { GoogleGenAI, Type } = require("@google/genai");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -15,14 +16,22 @@ app.use(express.json());
 
 // Initialize Gemini Client
 const API_KEY = process.env.GEMINI_API_KEY || "";
+if (!API_KEY) {
+  console.error("Gemini API key not found in environment variables");
+}
 const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 // Ensure API key is configured
 app.use((req, res, next) => {
-  if (!ai) {
+  if (!ai && req.path !== "/health") {
     return res.status(503).json({ error: "AI service temporarily unavailable - Missing API Key" });
   }
   next();
+});
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ status: "backend_running" });
 });
 
 // SYSTEM INSTRUCTION FOR STARTUP COPILOT
@@ -137,9 +146,11 @@ app.post("/chat", async (req, res) => {
       history,
     });
 
+    console.log("Gemini API request received (chat)");
     const response = await chat.sendMessage({
       message: lastMessage,
     });
+    console.log("Gemini API response returned (chat)");
 
     res.json({ response: response.text });
   } catch (error) {
@@ -173,9 +184,11 @@ app.post("/startup-insights", async (req, res) => {
       history,
     });
 
+    console.log("Gemini API request received (startup-insights)");
     const response = await chat.sendMessage({
       message: lastMessage,
     });
+    console.log("Gemini API response returned (startup-insights)");
 
     const insightsData = JSON.parse(response.text || "{}");
     res.json(insightsData);
@@ -191,18 +204,20 @@ app.post("/startup-insights", async (req, res) => {
 // ----------------------------------------------------
 app.post("/generate-logo", async (req, res) => {
   try {
-    const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+    const { startupName, startupDescription } = req.body;
+    if (!startupName) return res.status(400).json({ error: "startupName is required" });
 
+    console.log("Gemini API request received (generate-logo)");
     const response = await ai.models.generateImages({
-      model: 'imagen-3.0-generate-001',
-      prompt: `Create a modern, minimalist, high-contrast startup logo icon for the company: ${prompt}. Style: tech startup, vector icon, simple geometric design, white background, no text.`,
+      model: 'imagen-3.0-generate-002',
+      prompt: `Create a clean, modern, minimalist startup logo icon for the company ${startupName}. Style: tech startup, geometric symbol, vector-style icon, simple, high contrast, white background, no text.`,
       config: {
         numberOfImages: 1,
         aspectRatio: '1:1',
         outputMimeType: 'image/png'
       }
     });
+    console.log("Gemini API response returned (generate-logo)");
 
     const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
     if (imageBytes) {
@@ -221,8 +236,9 @@ app.post("/edit-logo", async (req, res) => {
     const { base64Image, editPrompt } = req.body;
     if (!base64Image || !editPrompt) return res.status(400).json({ error: "Both base64Image and editPrompt are required" });
 
+    console.log("Gemini API request received (edit-logo)");
     const response = await ai.models.editImage({
-      model: 'imagen-3.0-generate-001',
+      model: 'imagen-3.0-generate-002',
       prompt: editPrompt,
       referenceImages: [{
         imageBytes: base64Image.split(',')[1],
@@ -233,6 +249,7 @@ app.post("/edit-logo", async (req, res) => {
         outputMimeType: 'image/png'
       }
     });
+    console.log("Gemini API response returned (edit-logo)");
 
     const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
     if (imageBytes) {
@@ -246,6 +263,74 @@ app.post("/edit-logo", async (req, res) => {
   }
 });
 
+// ----------------------------------------------------
+// COMMUNITY IN-MEMORY DATABASE & ROUTES
+// ----------------------------------------------------
+let communityUsers = [
+  { id: 1, name: "Sarah Chen", startupIdea: "AI-powered legal document review", skills: ["AI/ML", "Python", "Law"], location: "San Francisco", lookingFor: "Developer", bio: "Former corporate lawyer turning tech founder." },
+  { id: 2, name: "Marcus Johnson", startupIdea: "Sustainable supply chain tracking", skills: ["Logistics", "Operations", "Sales"], location: "New York", lookingFor: "Technical Co-founder", bio: "10 years in global logistics. Ready to build something new." },
+  { id: 3, name: "Elena Rodriguez", startupIdea: "Fintech for gig workers", skills: ["React", "Node.js", "UX Design"], location: "Remote", lookingFor: "Marketer", bio: "Full-stack dev passionate about financial inclusion." }
+];
+
+let communityTeams = [
+  { id: 1, teamName: "LegalMind AI", startupIdea: "Automated contract analysis for small firms", rolesNeeded: ["Full Stack Developer", "Sales Lead"], description: "We have an MVP and initial traction. Need help scaling the platform." },
+  { id: 2, teamName: "EcoTrack", startupIdea: "Carbon footprint tracking API for e-commerce", rolesNeeded: ["Data Scientist", "Marketing Manager"], description: "Looking for passionate individuals to help us build the core recommendation engine." }
+];
+
+let communityPosts = [
+  { id: 1, title: "Validating a new pricing strategy for B2B SaaS", description: "Has anyone tried value-based pricing for early-stage enterprise tools? Would love some feedback on how to approach initial pilot customers.", tags: ["SaaS", "Pricing", "B2B"], author: "Marcus Johnson", likes: 12, comments: 4 },
+  { id: 2, title: "Looking for feedback on AI agent architecture", description: "I'm building a multi-agent system for customer support. Torn between LangChain and rolling my own orchestration. Thoughts?", tags: ["AI", "Architecture", "Engineering"], author: "Sarah Chen", likes: 24, comments: 8 }
+];
+
+let communityConnections = [];
+
+// GET /community/users
+app.get("/community/users", (req, res) => {
+  res.json(communityUsers);
+});
+
+// GET /community/teams
+app.get("/community/teams", (req, res) => {
+  res.json(communityTeams);
+});
+
+// GET /community/posts
+app.get("/community/posts", (req, res) => {
+  res.json(communityPosts);
+});
+
+// POST /community/connect
+app.post("/community/connect", (req, res) => {
+  const { targetUserId } = req.body;
+  if (!targetUserId) return res.status(400).json({ error: "targetUserId is required" });
+
+  // Simple mock connection logic
+  const connection = { userId: "current_user", targetUserId, status: "pending", timestamp: new Date().toISOString() };
+  communityConnections.push(connection);
+
+  res.json({ success: true, connection });
+});
+
+// POST /community/post
+app.post("/community/post", (req, res) => {
+  const { title, description, tags, author } = req.body;
+  if (!title || !description) return res.status(400).json({ error: "Title and description are required" });
+
+  const newPost = {
+    id: communityPosts.length + 1,
+    title,
+    description,
+    tags: tags || [],
+    author: author || "Alex Rivera", // Mocking current user
+    likes: 0,
+    comments: 0
+  };
+
+  communityPosts.unshift(newPost);
+  res.json({ success: true, post: newPost });
+});
+
 app.listen(PORT, () => {
+  console.log("Server started");
   console.log(`✅ Backend Proxy Server listening on http://localhost:${PORT}`);
 });

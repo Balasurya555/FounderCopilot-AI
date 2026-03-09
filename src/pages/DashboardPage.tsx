@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   Lightbulb,
@@ -25,7 +25,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { MOCK_MESSAGES, INITIAL_STARTUP_DATA, StartupData } from "../lib/mockData";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { generateStartupInsights, generateLogo, editLogo } from "../services/geminiService";
+import { generateStartupInsights, generateLogo, editLogo, checkHealth } from "../services/geminiService";
+import Community from "./Community";
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("Dashboard");
@@ -39,11 +40,23 @@ export default function DashboardPage() {
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isBackendReady, setIsBackendReady] = useState(false);
 
   useEffect(() => {
-    if (startupData?.startup_name && !startupLogo && !isGeneratingLogo && !hasUploadedLogo) {
-      handleGenerateLogo();
-    }
+    const checkBackend = async () => {
+      const ready = await checkHealth();
+      setIsBackendReady(ready);
+    };
+
+    // Check immediately, then poll every 2 seconds
+    checkBackend();
+    const interval = setInterval(checkBackend, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    // Logo generation is now manually triggered via user choice in chat
   }, [startupData?.startup_name, startupLogo, isGeneratingLogo, hasUploadedLogo]);
 
   const handleGenerateLogo = async () => {
@@ -51,7 +64,7 @@ export default function DashboardPage() {
     setIsGeneratingLogo(true);
     setLogoError(null);
     try {
-      const url = await generateLogo(startupData.startup_name);
+      const url = await generateLogo(startupData.startup_name, startupData.idea_summary);
       if (url) {
         setStartupLogo(url);
       } else {
@@ -92,16 +105,52 @@ export default function DashboardPage() {
         content: insights.chat_response || insights.next_question_for_founder || "I've updated the dashboard with my latest analysis. What do you think?",
         data: insights
       };
-      setMessages(prev => [...prev, aiMsg]);
+
+      const logoChoiceMsg = {
+        role: "assistant",
+        content: "Do you already have a logo for your startup, or would you like me to generate one?",
+        isLogoChoice: true
+      };
+
+      setMessages(prev => [...prev, aiMsg, logoChoiceMsg]);
       setStartupData(insights);
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Error:", error);
       setIsTyping(false);
       setMessages(prev => [...prev, {
         role: "assistant",
-        content: "I encountered an error while analyzing your idea. Please try again."
+        content: error.message || "I encountered an error while analyzing your idea. Please try again."
       }]);
     }
+  };
+
+  const handleUploadLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!['image/png', 'image/jpeg', 'image/svg+xml'].includes(file.type)) {
+        setLogoError("Invalid file type. Please upload a PNG, JPG, or SVG.");
+        return;
+      }
+      try {
+        const reader = new FileReader();
+        reader.onload = (rev) => {
+          setStartupLogo(rev.target?.result as string);
+          setHasUploadedLogo(true);
+          setLogoError(null);
+          setMessages(prev => prev.filter(msg => !(msg as any).isLogoChoice));
+          setActiveTab("Branding");
+        };
+        reader.readAsDataURL(file);
+      } catch (err) {
+        setLogoError("Logo upload failed.");
+      }
+    }
+  };
+
+  const handleGenerateLogoChoice = () => {
+    setMessages(prev => prev.filter(msg => !(msg as any).isLogoChoice));
+    setActiveTab("Branding");
+    handleGenerateLogo();
   };
 
   const clearChat = () => {
@@ -148,6 +197,7 @@ export default function DashboardPage() {
         <nav className="flex-1 px-4 space-y-1">
           {[
             { icon: LayoutDashboard, label: "Dashboard" },
+            { icon: Users, label: "Community" },
             { icon: Lightbulb, label: "Idea Validation" },
             { icon: Presentation, label: "Pitch Deck" },
             { icon: Palette, label: "Branding" },
@@ -582,6 +632,10 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </motion.div>
+              ) : activeTab === "Community" ? (
+                <div key="community">
+                  <Community startupData={startupData} />
+                </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto">
                   <div className="w-20 h-20 bg-indigo-100 rounded-3xl flex items-center justify-center text-indigo-600 mb-8 animate-pulse">
@@ -635,12 +689,38 @@ export default function DashboardPage() {
                       : "bg-slate-100 text-slate-800 rounded-tl-none"
                   )}>
                     {msg.content}
+                    {(msg as any).isLogoChoice && (
+                      <div className="mt-4 flex flex-col gap-2">
+                        <label className="w-full text-center px-4 py-2 bg-white text-indigo-600 border border-indigo-200 rounded-xl text-sm font-bold hover:bg-indigo-50 transition-all cursor-pointer">
+                          Upload Logo
+                          <input
+                            type="file"
+                            accept="image/png, image/jpeg, image/svg+xml"
+                            className="hidden"
+                            onChange={handleUploadLogo}
+                          />
+                        </label>
+                        <button
+                          onClick={handleGenerateLogoChoice}
+                          className="w-full px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-md shadow-indigo-200"
+                        >
+                          Generate Logo
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">
                     {msg.role === "user" ? "You" : "Copilot"} • Just now
                   </span>
                 </div>
               ))}
+              {!isBackendReady && (
+                <div className="flex flex-col gap-2 items-start">
+                  <div className="max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed bg-slate-100 text-slate-800 rounded-tl-none">
+                    Connecting to AI backend...
+                  </div>
+                </div>
+              )}
               {isTyping && (
                 <div className="flex items-start gap-2">
                   <div className="bg-slate-100 p-3 rounded-2xl rounded-tl-none flex gap-1">
@@ -659,9 +739,11 @@ export default function DashboardPage() {
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
                   placeholder={isListening ? "Listening..." : "Ask your co-founder anything..."}
+                  disabled={!isBackendReady || isTyping || isGeneratingLogo}
                   className={cn(
                     "w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-12 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none h-24",
-                    isListening && "border-indigo-500 bg-indigo-50/30"
+                    isListening && "border-indigo-500 bg-indigo-50/30",
+                    (!isBackendReady || isTyping || isGeneratingLogo) && "opacity-50 cursor-not-allowed"
                   )}
                 />
                 <div className="absolute bottom-3 right-3 flex items-center gap-2">
@@ -676,7 +758,8 @@ export default function DashboardPage() {
                   </button>
                   <button
                     onClick={() => handleSend()}
-                    className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                    disabled={!isBackendReady || isTyping || isGeneratingLogo || !inputValue.trim()}
+                    className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Send className="w-4 h-4" />
                   </button>

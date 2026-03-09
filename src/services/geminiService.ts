@@ -1,18 +1,40 @@
 const BACKEND_URL = "http://localhost:5000";
 
-export async function generateLogo(prompt: string): Promise<string | null> {
+export async function checkHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${BACKEND_URL}/generate-logo`, {
+    const response = await fetch(`${BACKEND_URL}/health`);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = 1): Promise<Response> {
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      throw new Error(`Backend Error: ${response.statusText}`);
+    }
+    return response;
+  } catch (error) {
+    if (retries > 0) {
+      console.warn(`Fetch failed, retrying in 1s. Remaining retries: ${retries}`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return fetchWithRetry(url, options, retries - 1);
+    }
+    throw error;
+  }
+}
+
+export async function generateLogo(startupName: string, startupDescription: string): Promise<string | null> {
+  try {
+    const response = await fetchWithRetry(`${BACKEND_URL}/generate-logo`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ startupName, startupDescription }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Backend Error: ${response.statusText}`);
-    }
 
     const data = await response.json();
     return data.imageBase64 || null;
@@ -24,17 +46,13 @@ export async function generateLogo(prompt: string): Promise<string | null> {
 
 export async function editLogo(base64Image: string, editPrompt: string): Promise<string | null> {
   try {
-    const response = await fetch(`${BACKEND_URL}/edit-logo`, {
+    const response = await fetchWithRetry(`${BACKEND_URL}/edit-logo`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ base64Image, editPrompt }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Backend Error: ${response.statusText}`);
-    }
 
     const data = await response.json();
     return data.imageBase64 || null;
@@ -46,17 +64,13 @@ export async function editLogo(base64Image: string, editPrompt: string): Promise
 
 export async function generateStartupInsights(messages: { role: string; content: string }[]) {
   try {
-    const response = await fetch(`${BACKEND_URL}/startup-insights`, {
+    const response = await fetchWithRetry(`${BACKEND_URL}/startup-insights`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ messages }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Backend Error: ${response.statusText}`);
-    }
 
     const data = await response.json();
 
@@ -68,6 +82,6 @@ export async function generateStartupInsights(messages: { role: string; content:
     return data;
   } catch (error) {
     console.error("Startup Insights Error:", error);
-    throw new Error("AI service temporarily unavailable");
+    throw new Error("AI service temporarily unavailable. Please try again.");
   }
 }
