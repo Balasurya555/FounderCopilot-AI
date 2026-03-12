@@ -19,13 +19,16 @@ import {
   Users,
   Target,
   BarChart2,
-  Sparkles
+  Sparkles,
+  CheckCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { MOCK_MESSAGES, INITIAL_STARTUP_DATA, StartupData } from "../lib/mockData";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { generateStartupInsights, generateLogo, editLogo, checkHealth } from "../services/geminiService";
+import { generateStartupInsights, editLogo, checkHealth } from "../services/geminiService";
+import { generateLogo } from "../services/logoService";
+import { exportCanvasToExcel } from "../utils/exportToExcel";
 import Community from "./Community";
 
 export default function DashboardPage() {
@@ -41,6 +44,14 @@ export default function DashboardPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isBackendReady, setIsBackendReady] = useState(false);
+  const [askedQuestions, setAskedQuestions] = useState<string[]>([]);
+  const [primaryColor, setPrimaryColor] = useState("#4F46E5");
+  const [secondaryColor, setSecondaryColor] = useState("#10B981");
+
+  const [logoShape, setLogoShape] = useState("Minimal");
+  const [logoStyle, setLogoStyle] = useState("Modern SaaS");
+  const [logoTheme, setLogoTheme] = useState("Tech");
+  const [generatedLogos, setGeneratedLogos] = useState<string[]>([]);
 
   useEffect(() => {
     const checkBackend = async () => {
@@ -63,10 +74,15 @@ export default function DashboardPage() {
     if (!startupData?.startup_name || hasUploadedLogo) return;
     setIsGeneratingLogo(true);
     setLogoError(null);
+    setGeneratedLogos([]);
     try {
-      const url = await generateLogo(startupData.startup_name, startupData.idea_summary);
-      if (url) {
-        setStartupLogo(url);
+      const fullDescription = logoEditPrompt
+        ? `${startupData.idea_summary}. Stylistic requests from founder: ${logoEditPrompt}.`
+        : startupData.idea_summary;
+
+      const urls = await generateLogo(startupData.startup_name, fullDescription, logoShape, logoStyle, logoTheme);
+      if (urls && urls.length > 0) {
+        setGeneratedLogos(urls);
       } else {
         setLogoError("Logo generation failed. Please try again.");
       }
@@ -80,10 +96,28 @@ export default function DashboardPage() {
   const handleEditLogo = async () => {
     if (!startupLogo || !logoEditPrompt.trim()) return;
     setIsGeneratingLogo(true);
-    const url = await editLogo(startupLogo, logoEditPrompt);
+
+    const colorInstruction = `Ensure the design heavily incorporates the primary color ${primaryColor} and secondary color ${secondaryColor}.`;
+    const fullEditPrompt = `${logoEditPrompt}. ${colorInstruction}`;
+
+    const url = await editLogo(startupLogo, fullEditPrompt);
     if (url) setStartupLogo(url);
     setLogoEditPrompt("");
     setIsGeneratingLogo(false);
+  };
+
+  const handleDownloadLogo = (format: 'png' | 'svg') => {
+    if (!startupLogo) return;
+    const link = document.createElement('a');
+
+    // In our new flow with Imagen 3, the images are actually JPEG base64 (despite the prompt constraints).
+    // We should download them as returned by the generated model.
+    link.href = startupLogo;
+    link.download = `${startupData?.startup_name?.replace(/\s+/g, '_').toLowerCase() || 'startup'}_logo.${format}`;
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleSend = async (text?: string) => {
@@ -97,8 +131,12 @@ export default function DashboardPage() {
     setIsTyping(true);
 
     try {
-      const insights = await generateStartupInsights(newMessages);
+      const insights = await generateStartupInsights(newMessages, askedQuestions);
       setIsTyping(false);
+
+      if (insights.next_question_for_founder) {
+        setAskedQuestions(prev => [...prev, insights.next_question_for_founder]);
+      }
 
       const aiMsg = {
         role: "assistant",
@@ -106,13 +144,20 @@ export default function DashboardPage() {
         data: insights
       };
 
-      const logoChoiceMsg = {
-        role: "assistant",
-        content: "Do you already have a logo for your startup, or would you like me to generate one?",
-        isLogoChoice: true
-      };
+      setMessages(prev => {
+        const hasAskedLogo = prev.some((m: any) => m.isLogoChoice) || hasUploadedLogo || startupLogo;
+        const newMsgs = [...prev, aiMsg];
 
-      setMessages(prev => [...prev, aiMsg, logoChoiceMsg]);
+        if (!hasAskedLogo && insights.startup_name) {
+          return [...newMsgs, {
+            role: "assistant",
+            content: "Do you already have a logo for your startup, or would you like me to generate one?",
+            isLogoChoice: true
+          }];
+        }
+        return newMsgs;
+      });
+
       setStartupData(insights);
     } catch (error: any) {
       console.error("AI Error:", error);
@@ -150,12 +195,12 @@ export default function DashboardPage() {
   const handleGenerateLogoChoice = () => {
     setMessages(prev => prev.filter(msg => !(msg as any).isLogoChoice));
     setActiveTab("Branding");
-    handleGenerateLogo();
   };
 
   const clearChat = () => {
     if (confirm("Are you sure you want to start a new session? This will clear the current chat.")) {
       setMessages([MOCK_MESSAGES[0]]);
+      setAskedQuestions([]);
     }
   };
 
@@ -183,6 +228,45 @@ export default function DashboardPage() {
   const handleMatrix = () => alert("Opening detailed competitor matrix...");
   const handleCustomizeBrand = () => alert("Opening brand customization suite...");
 
+  const handleDeployToCommunity = async () => {
+    if (!startupData) return;
+    try {
+      await fetch("http://localhost:5000/community/post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: startupData.startup_name,
+          description: startupData.idea_summary + " - " + startupData.problem_statement,
+          tags: startupData.target_customers,
+          author: "Alex Rivera"
+        })
+      });
+      alert("Successfully deployed to Community!");
+      setActiveTab("Community");
+    } catch (e) {
+      alert("Failed to deploy to Community");
+    }
+  };
+
+  const DESIGN_THINKING_STAGES = ["EMPATHIZE", "DEFINE", "IDEATE", "PROTOTYPE", "TEST", "LAUNCH"];
+
+  const isStageUnlocked = (targetStage: string) => {
+    if (!startupData?.design_thinking_stage) return targetStage === "EMPATHIZE";
+    const currentIndex = DESIGN_THINKING_STAGES.indexOf(startupData.design_thinking_stage);
+    const targetIndex = DESIGN_THINKING_STAGES.indexOf(targetStage);
+    return currentIndex >= targetIndex;
+  };
+
+  const availableNavItems = [
+    { icon: LayoutDashboard, label: "Dashboard", requiredStage: "EMPATHIZE" },
+    { icon: Users, label: "Community", requiredStage: "EMPATHIZE" }, // Community should always be visible to see others
+    { icon: Lightbulb, label: "Idea Validation", requiredStage: "DEFINE" },
+    { icon: Presentation, label: "Pitch Deck", requiredStage: "PROTOTYPE" },
+    { icon: Palette, label: "Branding", requiredStage: "PROTOTYPE" },
+    { icon: Megaphone, label: "Marketing Assets", requiredStage: "PROTOTYPE" },
+    { icon: UserCircle, label: "Investor Mode", requiredStage: "TEST" },
+  ].filter(item => isStageUnlocked(item.requiredStage));
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
       {/* Sidebar */}
@@ -195,15 +279,7 @@ export default function DashboardPage() {
         </div>
 
         <nav className="flex-1 px-4 space-y-1">
-          {[
-            { icon: LayoutDashboard, label: "Dashboard" },
-            { icon: Users, label: "Community" },
-            { icon: Lightbulb, label: "Idea Validation" },
-            { icon: Presentation, label: "Pitch Deck" },
-            { icon: Palette, label: "Branding" },
-            { icon: Megaphone, label: "Marketing Assets" },
-            { icon: UserCircle, label: "Investor Mode" },
-          ].map((item) => (
+          {availableNavItems.map((item) => (
             <button
               key={item.label}
               onClick={() => setActiveTab(item.label)}
@@ -301,34 +377,69 @@ export default function DashboardPage() {
                         onClick={handleExport}
                         className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all flex items-center gap-2"
                       >
-                        Export PDF <ChevronRight className="w-4 h-4" />
+                        Export <ChevronRight className="w-4 h-4" />
                       </button>
                       <button
                         onClick={handleShare}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                        className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-all font-medium"
                       >
                         Share Link
                       </button>
+                      {isStageUnlocked("LAUNCH") && (
+                        <button
+                          onClick={handleDeployToCommunity}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                        >
+                          Deploy to Community
+                        </button>
+                      )}
                     </div>
+                  </div>
+
+                  {/* Design Thinking Progress */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center justify-between overflow-x-auto">
+                    {DESIGN_THINKING_STAGES.map((stage, index) => {
+                      const currentStageIndex = DESIGN_THINKING_STAGES.indexOf(startupData.design_thinking_stage || "EMPATHIZE");
+                      const isCompleted = index < currentStageIndex;
+                      const isCurrent = index === currentStageIndex;
+
+                      return (
+                        <div key={stage} className="flex items-center gap-2 shrink-0">
+                          <div className={cn("flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm",
+                            isCompleted ? "bg-green-100 text-green-600" : isCurrent ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-400"
+                          )}>
+                            {isCompleted ? "✓" : index + 1}
+                          </div>
+                          <span className={cn("text-sm font-bold", isCurrent ? "text-indigo-600" : isCompleted ? "text-slate-800" : "text-slate-400")}>{stage}</span>
+                          {index < DESIGN_THINKING_STAGES.length - 1 && (
+                            <div className={cn("w-8 sm:w-16 h-px", isCompleted ? "bg-green-200" : "bg-slate-200")} />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Dashboard Tab */}
                   {(activeTab === "Dashboard" || activeTab === "Idea Validation") && (
                     <>
                       {/* Metrics Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                         {[
                           { label: "Market Size", value: startupData.market_size_estimate, icon: TrendingUp, color: "text-green-600", bg: "bg-green-50" },
                           { label: "Startup Score", value: startupData.startup_score, icon: Target, color: "text-indigo-600", bg: "bg-indigo-50" },
                           { label: "Competitors", value: startupData.competitors.length, icon: Users, color: "text-purple-600", bg: "bg-purple-50" },
                           { label: "Revenue Potential", value: startupData.revenue_projection.year3, icon: BarChart2, color: "text-orange-600", bg: "bg-orange-50" },
                         ].map((stat, i) => (
-                          <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                            <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center mb-4", stat.bg, stat.color)}>
-                              <stat.icon className="w-5 h-5" />
+                          <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shrink-0", stat.bg, stat.color)}>
+                                <stat.icon className="w-5 h-5" />
+                              </div>
                             </div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{stat.label}</p>
-                            <p className="text-2xl font-bold text-slate-900 mt-1">{stat.value}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">{stat.label}</p>
+                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                              <p className="text-xl font-bold text-slate-900 leading-tight">{stat.value}</p>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -336,80 +447,119 @@ export default function DashboardPage() {
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <div className="lg:col-span-2 space-y-8">
                           <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="text-xl font-bold mb-6">Market Opportunity</h3>
-                            <p className="text-slate-600 leading-relaxed mb-6">{startupData.problem_statement}</p>
+                            <h3 className="text-xl font-bold mb-6">Market Opportunity & Pain Points</h3>
+                            <p className="text-slate-600 leading-relaxed mb-6 font-medium italic">"{startupData.problem_statement}"</p>
+
+                            <div className="mb-6 space-y-3">
+                              <h4 className="font-bold text-sm text-slate-900">User Pain Points</h4>
+                              {startupData.user_pain_points?.map((pain: string, idx: number) => (
+                                <div key={idx} className="flex gap-2 items-start"><span className="text-red-500">•</span><span className="text-sm text-slate-700">{pain}</span></div>
+                              ))}
+                            </div>
+
+                            <h4 className="font-bold text-sm text-slate-900 mb-3">Target Customers</h4>
                             <div className="flex flex-wrap gap-2">
-                              {startupData.target_customers.map((tag, i) => (
-                                <span key={i} className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">
+                              {startupData.target_customers?.map((tag: string, i: number) => (
+                                <span key={i} className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold">
                                   {tag}
                                 </span>
                               ))}
                             </div>
                           </div>
 
-                          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="text-xl font-bold mb-6">Business Model Canvas</h3>
-                            <div className="grid grid-cols-5 gap-2 text-[8px] font-bold uppercase tracking-tighter">
-                              <div className="col-span-1 border border-slate-100 p-2 rounded-lg bg-slate-50 h-48 overflow-y-auto">
-                                <p className="mb-1 text-slate-400">Key Partners</p>
-                                {startupData.business_model_canvas.key_partners.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                          {isStageUnlocked("IDEATE") && (
+                            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                              <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-xl font-bold">Business Model Canvas</h3>
+                                <button
+                                  onClick={() => exportCanvasToExcel(startupData.business_model_canvas, startupData.startup_name)}
+                                  className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1"
+                                >
+                                  Export to Excel
+                                </button>
                               </div>
-                              <div className="col-span-1 flex flex-col gap-2">
-                                <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-24 overflow-y-auto">
-                                  <p className="mb-1 text-slate-400">Key Activities</p>
-                                  {startupData.business_model_canvas.key_activities.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                              <div className="grid grid-cols-5 gap-2 text-[8px] font-bold uppercase tracking-tighter">
+                                <div className="col-span-1 border border-slate-100 p-2 rounded-lg bg-slate-50 h-48 overflow-y-auto">
+                                  <p className="mb-1 text-slate-400">Key Partners</p>
+                                  {startupData.business_model_canvas.key_partners.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
                                 </div>
-                                <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-22 overflow-y-auto">
-                                  <p className="mb-1 text-slate-400">Key Resources</p>
-                                  {startupData.business_model_canvas.key_resources.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                <div className="col-span-1 flex flex-col gap-2">
+                                  <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-24 overflow-y-auto">
+                                    <p className="mb-1 text-slate-400">Key Activities</p>
+                                    {startupData.business_model_canvas.key_activities.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                  </div>
+                                  <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-22 overflow-y-auto">
+                                    <p className="mb-1 text-slate-400">Key Resources</p>
+                                    {startupData.business_model_canvas.key_resources.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="col-span-1 border border-indigo-100 p-2 rounded-lg bg-indigo-50/50 h-48 text-indigo-600 overflow-y-auto">
-                                <p className="mb-1 text-indigo-400">Value Proposition</p>
-                                {startupData.business_model_canvas.value_proposition.map((p, j) => <p key={j} className="mb-1">• {p}</p>)}
-                              </div>
-                              <div className="col-span-1 flex flex-col gap-2">
-                                <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-24 overflow-y-auto">
-                                  <p className="mb-1 text-slate-400">Customer Relationships</p>
-                                  {startupData.business_model_canvas.customer_relationships.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                <div className="col-span-1 border border-indigo-100 p-2 rounded-lg bg-indigo-50/50 h-48 text-indigo-600 overflow-y-auto">
+                                  <p className="mb-1 text-indigo-400">Value Proposition</p>
+                                  {startupData.business_model_canvas.value_proposition.map((p, j) => <p key={j} className="mb-1">• {p}</p>)}
                                 </div>
-                                <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-22 overflow-y-auto">
-                                  <p className="mb-1 text-slate-400">Channels</p>
-                                  {startupData.business_model_canvas.channels.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                <div className="col-span-1 flex flex-col gap-2">
+                                  <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-24 overflow-y-auto">
+                                    <p className="mb-1 text-slate-400">Customer Relationships</p>
+                                    {startupData.business_model_canvas.customer_relationships.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                  </div>
+                                  <div className="border border-slate-100 p-2 rounded-lg bg-slate-50 h-22 overflow-y-auto">
+                                    <p className="mb-1 text-slate-400">Channels</p>
+                                    {startupData.business_model_canvas.channels.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="col-span-1 border border-slate-100 p-2 rounded-lg bg-slate-50 h-48 overflow-y-auto">
-                                <p className="mb-1 text-slate-400">Customer Segments</p>
-                                {startupData.business_model_canvas.customer_segments.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
-                              </div>
-                              <div className="col-span-2 border border-slate-100 p-2 rounded-lg bg-slate-50 h-20 overflow-y-auto">
-                                <p className="mb-1 text-slate-400">Cost Structure</p>
-                                {startupData.business_model_canvas.cost_structure.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
-                              </div>
-                              <div className="col-span-3 border border-slate-100 p-2 rounded-lg bg-slate-50 h-20 overflow-y-auto">
-                                <p className="mb-1 text-slate-400">Revenue Streams</p>
-                                {startupData.business_model_canvas.revenue_streams.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                <div className="col-span-1 border border-slate-100 p-2 rounded-lg bg-slate-50 h-48 overflow-y-auto">
+                                  <p className="mb-1 text-slate-400">Customer Segments</p>
+                                  {startupData.business_model_canvas.customer_segments.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                </div>
+                                <div className="col-span-2 border border-slate-100 p-2 rounded-lg bg-slate-50 h-20 overflow-y-auto">
+                                  <p className="mb-1 text-slate-400">Cost Structure</p>
+                                  {startupData.business_model_canvas.cost_structure.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                </div>
+                                <div className="col-span-3 border border-slate-100 p-2 rounded-lg bg-slate-50 h-20 overflow-y-auto">
+                                  <p className="mb-1 text-slate-400">Revenue Streams</p>
+                                  {startupData.business_model_canvas.revenue_streams.map((p, j) => <p key={j} className="text-slate-700 mb-1">• {p}</p>)}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
                         </div>
                         <div className="space-y-8">
-                          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="font-bold mb-4">Competitor Landscape</h3>
-                            <div className="space-y-4">
-                              {startupData.competitors.map((comp, i) => (
-                                <div key={i} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 bg-white rounded-lg border border-slate-200 flex items-center justify-center font-bold text-xs">
-                                      {comp[0]}
+                          {isStageUnlocked("IDEATE") && (
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <h3 className="font-bold mb-4">Competitor Landscape</h3>
+                              <div className="space-y-4">
+                                {startupData.competitors?.map((comp, i) => (
+                                  <div key={i} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 bg-white rounded-lg border border-slate-200 flex items-center justify-center font-bold text-xs">
+                                        {comp[0]}
+                                      </div>
+                                      <span className="text-sm font-medium">{comp}</span>
                                     </div>
-                                    <span className="text-sm font-medium">{comp}</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase">Direct</span>
                                   </div>
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase">Direct</span>
-                                </div>
-                              ))}
+                                ))}
+                              </div>
                             </div>
-                          </div>
+                          )}
+
+                          {isStageUnlocked("TEST") && (
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <h3 className="font-bold mb-4">Validation Plan</h3>
+                              <div className="space-y-3">
+                                {startupData.validation_plan?.map((plan: string, idx: number) => (
+                                  <div key={idx} className="flex gap-2 items-start text-sm text-slate-700">
+                                    <CheckCircle className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
+                                    <span>{plan}</span>
+                                  </div>
+                                ))}
+                                <div className="mt-4 pt-4 border-t border-slate-100">
+                                  <h4 className="font-bold text-[10px] text-slate-400 uppercase mb-2">Early Adopters Strategy</h4>
+                                  <p className="text-sm font-medium text-slate-800">{startupData.early_adopters_strategy}</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </>
@@ -445,32 +595,7 @@ export default function DashboardPage() {
                             <h3 className="text-xl font-bold mb-2">Logo Concept</h3>
                             <p className="text-indigo-100 text-sm mb-6">AI-generated based on your unique advantage: "{startupData.unique_advantage}"</p>
 
-                            <div className="space-y-4">
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  value={logoEditPrompt}
-                                  onChange={(e) => setLogoEditPrompt(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && handleEditLogo()}
-                                  placeholder="Edit logo (e.g. 'Make it blue')"
-                                  className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm placeholder:text-indigo-200 focus:outline-none focus:ring-1 focus:ring-white/50"
-                                />
-                                <button
-                                  onClick={handleEditLogo}
-                                  disabled={isGeneratingLogo || !logoEditPrompt.trim()}
-                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white disabled:opacity-30"
-                                >
-                                  <ChevronRight className="w-5 h-5" />
-                                </button>
-                              </div>
-                              <button
-                                onClick={handleGenerateLogo}
-                                disabled={isGeneratingLogo}
-                                className="w-full py-3 bg-white text-indigo-600 rounded-2xl text-sm font-bold hover:bg-indigo-50 transition-all disabled:opacity-50"
-                              >
-                                Regenerate Logo
-                              </button>
-                            </div>
+                            {/* Setup form moved to the Brand Identity card on the right */}
                           </div>
 
                           <div className="w-48 h-48 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center shrink-0 overflow-hidden border border-white/30 relative group">
@@ -488,17 +613,7 @@ export default function DashboardPage() {
                                     type="file"
                                     accept="image/*"
                                     className="hidden"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        const reader = new FileReader();
-                                        reader.onload = (rev) => {
-                                          setStartupLogo(rev.target?.result as string);
-                                          setHasUploadedLogo(true);
-                                        };
-                                        reader.readAsDataURL(file);
-                                      }
-                                    }}
+                                    onChange={handleUploadLogo}
                                   />
                                 </label>
                               </>
@@ -520,17 +635,7 @@ export default function DashboardPage() {
                                   type="file"
                                   accept="image/*"
                                   className="hidden"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      const reader = new FileReader();
-                                      reader.onload = (rev) => {
-                                        setStartupLogo(rev.target?.result as string);
-                                        setHasUploadedLogo(true);
-                                      };
-                                      reader.readAsDataURL(file);
-                                    }
-                                  }}
+                                  onChange={handleUploadLogo}
                                 />
                               </label>
                             )}
@@ -542,39 +647,243 @@ export default function DashboardPage() {
                       <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                         <h3 className="text-xl font-bold mb-2">Brand Identity</h3>
                         <p className="text-slate-500 text-sm mb-6">Visual guidelines generated for {startupData.startup_name}</p>
-                        <div className="flex items-center gap-4 mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                          {startupLogo ? (
-                            <img src={startupLogo} alt="Small Logo" className="w-12 h-12 rounded-lg object-cover" />
-                          ) : (
-                            <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center font-bold text-indigo-600">
-                              {startupData.startup_name.substring(0, 2).toUpperCase()}
+                        {!startupLogo && !hasUploadedLogo && !isGeneratingLogo ? (
+                          <div className="space-y-4 bg-slate-50 p-6 rounded-2xl border border-slate-200 flex-1 flex flex-col justify-start">
+                            {generatedLogos.length > 0 ? (
+                              <div className="space-y-4">
+                                <p className="text-sm font-bold text-slate-800">Select a Professional Logo Concept</p>
+                                <div className="grid grid-cols-3 gap-4">
+                                  {generatedLogos.map((logo, idx) => (
+                                    <div key={idx} className="flex flex-col gap-2">
+                                      <div className="aspect-square bg-white rounded-xl border border-slate-200 overflow-hidden">
+                                        <img src={logo} alt={`Concept ${idx + 1}`} className="w-full h-full object-cover" />
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          setStartupLogo(logo);
+                                          setHasUploadedLogo(false);
+
+                                          // Aesthetic Auto generation of brand identity based on logo selection (mock logical mapping based on shape/style)
+                                          const stylingColors = {
+                                            "Modern SaaS": ["#6366f1", "#14b8a6"],
+                                            "Futuristic AI": ["#8b5cf6", "#f43f5e"],
+                                            "Minimal Tech": ["#0f172a", "#3b82f6"],
+                                            "Clean Startup": ["#10b981", "#3b82f6"],
+                                            "Bold Tech": ["#ef4444", "#f59e0b"],
+                                            "Geometric Symbol": ["#3b82f6", "#8b5cf6"]
+                                          };
+
+                                          const colors = stylingColors[logoStyle as keyof typeof stylingColors] || ["#4f46e5", "#10b981"];
+                                          setPrimaryColor(colors[0]);
+                                          setSecondaryColor(colors[1]);
+                                        }}
+                                        className="w-full py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 transition-all"
+                                      >
+                                        Select Logo {idx + 1}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-slate-200 flex flex-col gap-3">
+                                  <button
+                                    onClick={() => setGeneratedLogos([])}
+                                    className="w-full py-2 bg-white text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-all"
+                                  >
+                                    Edit Options & Regenerate
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                <p className="text-sm font-bold text-slate-800 mb-2">Design your startup identity</p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">Logo Shape</label>
+                                    <select
+                                      value={logoShape}
+                                      onChange={(e) => setLogoShape(e.target.value)}
+                                      className="w-full bg-white text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                      <option value="Circle">Circle</option>
+                                      <option value="Hexagon">Hexagon</option>
+                                      <option value="Square">Square</option>
+                                      <option value="Abstract geometric">Abstract geometric</option>
+                                      <option value="Shield">Shield</option>
+                                      <option value="Minimal symbol">Minimal symbol</option>
+                                      <option value="AI generated abstract">AI generated abstract</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">Logo Style</label>
+                                    <select
+                                      value={logoStyle}
+                                      onChange={(e) => setLogoStyle(e.target.value)}
+                                      className="w-full bg-white text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                      <option value="Minimal Tech">Minimal Tech</option>
+                                      <option value="Modern SaaS">Modern SaaS</option>
+                                      <option value="Futuristic AI">Futuristic AI</option>
+                                      <option value="Clean Startup">Clean Startup</option>
+                                      <option value="Bold Tech">Bold Tech</option>
+                                      <option value="Geometric Symbol">Geometric Symbol</option>
+                                    </select>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">Icon Theme</label>
+                                    <select
+                                      value={logoTheme}
+                                      onChange={(e) => setLogoTheme(e.target.value)}
+                                      className="w-full bg-white text-slate-900 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                      <option value="AI">AI</option>
+                                      <option value="Logistics">Logistics</option>
+                                      <option value="Fintech">Fintech</option>
+                                      <option value="HealthTech">HealthTech</option>
+                                      <option value="Education">Education</option>
+                                      <option value="Developer Tools">Developer Tools</option>
+                                      <option value="Generic Tech">Generic Tech</option>
+                                    </select>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 mb-1">Additional Concepts (Optional)</label>
+                                  <textarea
+                                    value={logoEditPrompt}
+                                    onChange={(e) => setLogoEditPrompt(e.target.value)}
+                                    placeholder="e.g. 'Use a rocket icon'"
+                                    className="w-full bg-white text-slate-900 border border-slate-200 rounded-xl px-4 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 h-16 custom-scrollbar"
+                                  />
+                                </div>
+
+                                <div className="pt-2 flex flex-col gap-2">
+                                  <button
+                                    onClick={handleGenerateLogo}
+                                    className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg"
+                                  >
+                                    Generate 3 Concepts
+                                  </button>
+                                  <div className="relative flex items-center py-2">
+                                    <div className="flex-grow border-t border-slate-200"></div>
+                                    <span className="flex-shrink-0 mx-4 text-xs font-bold text-slate-400">OR</span>
+                                    <div className="flex-grow border-t border-slate-200"></div>
+                                  </div>
+                                  <label className="w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all text-center cursor-pointer">
+                                    Upload Your Own Logo
+                                    <input
+                                      type="file"
+                                      accept=".png,.jpg,.jpeg,.svg"
+                                      className="hidden"
+                                      onChange={handleUploadLogo}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-4 mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                              {startupLogo ? (
+                                <img src={startupLogo} alt="Small Logo" className="w-12 h-12 rounded-lg object-cover" />
+                              ) : (
+                                <div className="w-12 h-12 rounded-lg bg-indigo-100 flex items-center justify-center font-bold text-indigo-600">
+                                  {startupData.startup_name.substring(0, 2).toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-sm font-bold">{startupData.startup_name}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Brand Mark</p>
+                              </div>
                             </div>
-                          )}
-                          <div>
-                            <p className="text-sm font-bold">{startupData.startup_name}</p>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Brand Mark</p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 flex-1">
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Primary Color</p>
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-indigo-600" />
-                              <span className="text-sm font-mono">#4F46E5</span>
+                            <div className="grid grid-cols-2 gap-4 flex-1 mb-6">
+                              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative overflow-hidden group">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Primary Color</p>
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="w-8 h-8 rounded-lg shadow-inner border border-black/10 relative overflow-hidden cursor-pointer"
+                                    style={{ backgroundColor: primaryColor }}
+                                  >
+                                    <input
+                                      type="color"
+                                      className="absolute inset-[-10px] w-[50px] h-[50px] cursor-pointer opacity-0"
+                                      value={primaryColor}
+                                      onChange={(e) => setPrimaryColor(e.target.value)}
+                                    />
+                                  </div>
+                                  <span className="text-sm font-mono font-medium">{primaryColor.toUpperCase()}</span>
+                                </div>
+                              </div>
+                              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 relative overflow-hidden group">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Secondary Color</p>
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="w-8 h-8 rounded-lg shadow-inner border border-black/10 relative overflow-hidden cursor-pointer"
+                                    style={{ backgroundColor: secondaryColor }}
+                                  >
+                                    <input
+                                      type="color"
+                                      className="absolute inset-[-10px] w-[50px] h-[50px] cursor-pointer opacity-0"
+                                      value={secondaryColor}
+                                      onChange={(e) => setSecondaryColor(e.target.value)}
+                                    />
+                                  </div>
+                                  <span className="text-sm font-mono font-medium">{secondaryColor.toUpperCase()}</span>
+                                </div>
+                              </div>
+                              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 col-span-2">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Typography</p>
+                                <p className="text-lg font-bold tracking-tight">Inter / Space Grotesk</p>
+                              </div>
                             </div>
-                          </div>
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Secondary Color</p>
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-emerald-500" />
-                              <span className="text-sm font-mono">#10B981</span>
+
+                            <div className="space-y-4 mt-auto pt-6 border-t border-slate-100">
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={logoEditPrompt}
+                                  onChange={(e) => setLogoEditPrompt(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleEditLogo()}
+                                  placeholder="Edit logo (e.g. 'Make it blue')"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                />
+                                <button
+                                  onClick={handleEditLogo}
+                                  disabled={isGeneratingLogo || !logoEditPrompt.trim()}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 disabled:opacity-30"
+                                >
+                                  <ChevronRight className="w-5 h-5" />
+                                </button>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={handleGenerateLogo}
+                                  disabled={isGeneratingLogo}
+                                  className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl text-sm font-bold hover:bg-slate-50 transition-all disabled:opacity-50"
+                                >
+                                  Regenerate
+                                </button>
+                                <div className="flex gap-2 w-full">
+                                  <button
+                                    onClick={() => handleDownloadLogo('png')}
+                                    disabled={isGeneratingLogo || !startupLogo}
+                                    className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50"
+                                  >
+                                    Download PNG
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadLogo('svg')}
+                                    disabled={isGeneratingLogo || !startupLogo}
+                                    className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50"
+                                  >
+                                    Download SVG
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 col-span-2">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Typography</p>
-                            <p className="text-lg font-bold tracking-tight">Inter / Space Grotesk</p>
-                          </div>
-                        </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -768,7 +1077,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 }

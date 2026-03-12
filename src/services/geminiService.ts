@@ -62,14 +62,14 @@ export async function editLogo(base64Image: string, editPrompt: string): Promise
   }
 }
 
-export async function generateStartupInsights(messages: { role: string; content: string }[]) {
+export async function generateStartupInsights(messages: { role: string; content: string }[], askedQuestions: string[] = []) {
   try {
     const response = await fetchWithRetry(`${BACKEND_URL}/startup-insights`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, askedQuestions }),
     });
 
     const data = await response.json();

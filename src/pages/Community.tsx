@@ -21,7 +21,7 @@ export default function Community({ startupData }: CommunityProps) {
     const [users, setUsers] = useState<CommunityUser[]>([]);
     const [teams, setTeams] = useState<CommunityTeam[]>([]);
     const [posts, setPosts] = useState<CommunityPost[]>([]);
-    const [activeTab, setActiveTab] = useState<"discover" | "teams" | "feed">("discover");
+    const [activeTab, setActiveTab] = useState<"discover" | "teams" | "feed">("feed");
 
     // Feed Form State
     const [postTitle, setPostTitle] = useState(startupData?.startup_name || "");
@@ -276,6 +276,20 @@ export default function Community({ startupData }: CommunityProps) {
                                         </button>
                                         <button className="flex items-center gap-1.5 hover:text-indigo-600 transition-colors">
                                             <MessageSquare className="w-4 h-4" /> {post.comments}
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-4 sm:mt-0">
+                                        <button
+                                            onClick={() => alert("Added to team waitlist: " + post.title)}
+                                            className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-all border border-indigo-100"
+                                        >
+                                            Join Team
+                                        </button>
+                                        <button
+                                            onClick={() => alert("Opening feedback module...")}
+                                            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all"
+                                        >
+                                            Provide Feedback
                                         </button>
                                     </div>
                                 </div>

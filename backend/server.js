@@ -1,7 +1,8 @@
 const dotenv = require("dotenv");
+const path = require("path");
 
-// Load local .env variables
-dotenv.config();
+// Load local .env variables from the backend folder
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
 const cors = require("cors");
@@ -35,36 +36,45 @@ app.get("/health", (req, res) => {
 });
 
 // SYSTEM INSTRUCTION FOR STARTUP COPILOT
-const SYSTEM_INSTRUCTION = `You are Founder Copilot, a seasoned startup founder and mentor who has built and exited multiple companies.
-Your mindset is strictly "Startup Founder": lean, aggressive, MVP-focused, and obsessed with product-market fit.
+const SYSTEM_INSTRUCTION = `You are Founder Copilot, an AI mentor that guides founders through the Design Thinking framework to build successful startups.
 
 Your Goal:
-Guide the user through the grueling process of turning a raw idea into a viable business. Don't be "nice" - be honest, analytical, and strategic. If an idea is weak, challenge it. If it's strong, help scale it.
+Guide the user step-by-step through the six stages of Design Thinking: EMPATHIZE, DEFINE, IDEATE, PROTOTYPE, TEST, and LAUNCH. You must NEVER skip stages. Wait for the user to answer questions in the current stage before moving on.
 
-Your Philosophy:
-1. MVP First: Forget feature bloat. What's the smallest thing we can build to prove value?
-2. Iterate Fast: Build, measure, learn.
-3. Distribution is Everything: A great product with no distribution is a hobby.
-4. Scale or Die: We aren't building a lifestyle business; we're building a world-changing startup.
+The 6 Stages and Your Tasks:
+1. EMPATHIZE: Understand the target audience. Ask: Who experiences this problem? What pain points do they face? What existing solutions are failing them?
+2. DEFINE: Define the problem clearly. Ask the user to format their problem statement like: "[User] needs a way to [solve problem] because [reason]."
+3. IDEATE: Generate solution concepts, analyze competitors, and propose a unique value proposition.
+4. PROTOTYPE: Generate MVP features, wireframe ideas, and suggest branding concepts (including a logo).
+5. TEST: Validate the idea. Ask: Who would be your first 10 users? How will you test this MVP? What metrics determine success?
+6. LAUNCH: Prepare startup assets for publication. Tell the user they are ready to launch and can click the "Deploy to Community" button on the dashboard.
+
+CONVERSATION FLOW RULES:
+- Start with the EMPATHIZE stage for a new idea.
+- Keep responses concise, instructional, and action-oriented.
+- Act as a mentor, coach, and innovation guide.
+- ALWAYS check the conversation history and asked questions. Never repeat a question.
+- Adapt your questions based on the user's previous answers.
 
 In every response:
-1. Analyze the input like a VC evaluating a pitch.
-2. Provide strategic advice (e.g., "This isn't a moat," "Target this segment first").
-3. Ask ONE sharp, critical follow-up question that helps fill the dashboard data.
-4. Update the structured insights JSON based on our evolving conversation.
+1. Analyze the input like an expert design thinking coach.
+2. Provide feedback.
+3. Ask ONE sharp, relevant follow-up question for the current stage.
+4. If a stage's goals are met, explicitly state that you are transitioning to the next stage (e.g., "Great, we've empathized with the user. Let's move to the DEFINE stage.").
+5. Update the structured JSON data based on the conversation.
 
-Tone: Professional, direct, slightly intense, entrepreneurial, and deeply supportive of the JOURNEY (not just the idea).
-
-Always return a JSON block at the end of your response containing structured startup insights.
-The dashboard will update based on this JSON.`;
+Return a valid JSON block at the end of your response containing the structured startup insights. The 'design_thinking_stage' field should reflect the CURRENT stage of the conversation (EMPATHIZE, DEFINE, IDEATE, PROTOTYPE, TEST, or LAUNCH).`;
 
 const startupSchema = {
   type: Type.OBJECT,
   properties: {
     startup_name: { type: Type.STRING },
     idea_summary: { type: Type.STRING },
+    design_thinking_stage: { type: Type.STRING, description: "Current stage: EMPATHIZE, DEFINE, IDEATE, PROTOTYPE, TEST, or LAUNCH" },
     problem_statement: { type: Type.STRING },
     target_customers: { type: Type.ARRAY, items: { type: Type.STRING } },
+    user_pain_points: { type: Type.ARRAY, items: { type: Type.STRING } },
+    existing_solutions: { type: Type.ARRAY, items: { type: Type.STRING } },
     market_size_estimate: { type: Type.STRING },
     competitors: { type: Type.ARRAY, items: { type: Type.STRING } },
     unique_advantage: { type: Type.STRING },
@@ -97,15 +107,21 @@ const startupSchema = {
       description: "Array of strings representing slide content for: Problem, Solution, Market Opportunity, Product, Business Model, Go To Market",
     },
     marketing_video_idea: { type: Type.STRING },
+    validation_plan: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Steps to test and validate the MVP" },
+    early_adopters_strategy: { type: Type.STRING, description: "How to acquire the first 10-100 users" },
     startup_score: { type: Type.STRING },
     chat_response: { type: Type.STRING, description: "The human-like conversational response to the founder." },
     next_question_for_founder: { type: Type.STRING },
+    current_category: { type: Type.STRING, description: "The category the next question belongs to: problem, customer, market, competition, revenue, growth" },
   },
   required: [
     "startup_name",
     "idea_summary",
+    "design_thinking_stage",
     "problem_statement",
     "target_customers",
+    "user_pain_points",
+    "existing_solutions",
     "market_size_estimate",
     "competitors",
     "unique_advantage",
@@ -114,9 +130,12 @@ const startupSchema = {
     "business_model_canvas",
     "pitch_deck_preview",
     "marketing_video_idea",
+    "validation_plan",
+    "early_adopters_strategy",
     "startup_score",
     "chat_response",
     "next_question_for_founder",
+    "current_category"
   ],
 };
 
@@ -139,7 +158,7 @@ app.post("/chat", async (req, res) => {
     const lastMessage = messages[messages.length - 1].content;
 
     const chat = ai.chats.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       config: {
         systemInstruction: SYSTEM_INSTRUCTION
       },
@@ -160,22 +179,62 @@ app.post("/chat", async (req, res) => {
 });
 
 // ----------------------------------------------------
+// Helper for similarity checking
+// ----------------------------------------------------
+function calculateSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+  const s1 = str1.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const s2 = str2.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (s1 === s2) return 1.0;
+  if (s1.length === 0 || s2.length === 0) return 0.0;
+
+  // Simple intersection-over-union for bigrams
+  const getBigrams = (str) => {
+    const bigrams = new Set();
+    for (let i = 0; i < str.length - 1; i++) {
+      bigrams.add(str.substring(i, i + 2));
+    }
+    return bigrams;
+  };
+
+  const bg1 = getBigrams(s1);
+  const bg2 = getBigrams(s2);
+
+  if (bg1.size === 0 || bg2.size === 0) return 0.0;
+
+  let intersection = 0;
+  for (const bg of bg1) {
+    if (bg2.has(bg)) intersection++;
+  }
+
+  const union = bg1.size + bg2.size - intersection;
+  return intersection / union;
+}
+
+// ----------------------------------------------------
 // 2. POST /startup-insights
+
 // Returns structured startup insights parsed as JSON
 // ----------------------------------------------------
 app.post("/startup-insights", async (req, res) => {
   try {
-    const { messages } = req.body;
+    const { messages, askedQuestions = [] } = req.body;
     if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages array format" });
 
     const history = messages.slice(0, -1).map(msg => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }]
     }));
-    const lastMessage = messages[messages.length - 1].content;
+
+    // Inject askedQuestions into the prompt to provide immediate context
+    let lastMessage = messages[messages.length - 1].content;
+    if (askedQuestions && askedQuestions.length > 0) {
+      lastMessage += `\n\n[SYSTEM NOTE: Do not ask any of these questions again:\n${askedQuestions.map(q => `- ${q}`).join('\n')}]`;
+    }
 
     const chat = ai.chats.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-flash-latest",
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
@@ -185,12 +244,50 @@ app.post("/startup-insights", async (req, res) => {
     });
 
     console.log("Gemini API request received (startup-insights)");
-    const response = await chat.sendMessage({
-      message: lastMessage,
-    });
+
+    let insightsData = null;
+    let validQuestionFound = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 3;
+
+    while (!validQuestionFound && attempts < MAX_ATTEMPTS) {
+      attempts++;
+      const response = await chat.sendMessage({
+        message: lastMessage,
+      });
+
+      insightsData = JSON.parse(response.text || "{}");
+      const generatedQuestion = insightsData.next_question_for_founder;
+
+      let isDuplicate = false;
+      if (generatedQuestion && askedQuestions.length > 0) {
+        for (const asked of askedQuestions) {
+          const similarity = calculateSimilarity(generatedQuestion, asked);
+          if (similarity > 0.8) {
+            isDuplicate = true;
+            console.log(`[Attempt ${attempts}] Duplicate question detected (Similarity: ${similarity.toFixed(2)}): "${generatedQuestion}" matches "${asked}"`);
+            break;
+          }
+        }
+      }
+
+      if (!isDuplicate) {
+        validQuestionFound = true;
+        console.log(`[Attempt ${attempts}] Unique question successfully generated.`);
+      } else if (attempts < MAX_ATTEMPTS) {
+        // If duplicate, append a strong instruction to try again
+        lastMessage = `Your previous question "${generatedQuestion}" was too similar to one already asked. Analyze the data and ask a COMPLETELY DIFFERENT question advancing to the next logical stage.`;
+      }
+    }
+
+    // Fallback behavior if a unique question couldn't be generated after MAX_ATTEMPTS
+    if (!validQuestionFound && insightsData) {
+      console.log("Fallback triggered: Could not generate a unique question.");
+      insightsData.next_question_for_founder = "Based on what you've shared, let's analyze your market opportunity.";
+    }
+
     console.log("Gemini API response returned (startup-insights)");
 
-    const insightsData = JSON.parse(response.text || "{}");
     res.json(insightsData);
   } catch (error) {
     console.error("Startup Insights Error:", error.message, error);
@@ -200,7 +297,7 @@ app.post("/startup-insights", async (req, res) => {
 
 // ----------------------------------------------------
 // 3. POST /generate-logo
-// Generates image from text directly calling imagen-3.0 models
+// Generates image from text directly calling gemini-flash models for SVG
 // ----------------------------------------------------
 app.post("/generate-logo", async (req, res) => {
   try {
@@ -208,22 +305,20 @@ app.post("/generate-logo", async (req, res) => {
     if (!startupName) return res.status(400).json({ error: "startupName is required" });
 
     console.log("Gemini API request received (generate-logo)");
-    const response = await ai.models.generateImages({
-      model: 'imagen-3.0-generate-002',
-      prompt: `Create a clean, modern, minimalist startup logo icon for the company ${startupName}. Style: tech startup, geometric symbol, vector-style icon, simple, high contrast, white background, no text.`,
-      config: {
-        numberOfImages: 1,
-        aspectRatio: '1:1',
-        outputMimeType: 'image/png'
-      }
+    const prompt = `You are an expert logo designer. Generate a clean, modern SVG logo for a startup named "${startupName}". Description: ${startupDescription || 'minimalist tech startup'}. Return ONLY the raw, valid SVG code string and nothing else. Ensure it's responsive (using viewBox) and visually appealing. Do not wrap in markdown tags.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-flash-latest',
+      contents: prompt
     });
     console.log("Gemini API response returned (generate-logo)");
 
-    const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
-    if (imageBytes) {
-      res.json({ imageBase64: `data:image/png;base64,${imageBytes}` });
+    const svgCode = response.text?.replace(/```xml/g, '')?.replace(/```svg/g, '')?.replace(/```/g, '')?.trim();
+    if (svgCode && svgCode.startsWith('<svg')) {
+      const base64Svg = Buffer.from(svgCode).toString('base64');
+      res.json({ imageBase64: `data:image/svg+xml;base64,${base64Svg}` });
     } else {
-      res.status(500).json({ error: "No image bytes returned" });
+      res.status(500).json({ error: "No valid SVG generated" });
     }
   } catch (error) {
     console.error("Logo Generation Error:", error);
@@ -237,28 +332,100 @@ app.post("/edit-logo", async (req, res) => {
     if (!base64Image || !editPrompt) return res.status(400).json({ error: "Both base64Image and editPrompt are required" });
 
     console.log("Gemini API request received (edit-logo)");
-    const response = await ai.models.editImage({
-      model: 'imagen-3.0-generate-002',
-      prompt: editPrompt,
-      referenceImages: [{
-        imageBytes: base64Image.split(',')[1],
-        mimeType: "image/png"
-      }],
-      config: {
-        numberOfImages: 1,
-        outputMimeType: 'image/png'
-      }
+
+    const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    let mimeType = "image/png";
+    let b64Data = base64Image;
+    if (matches && matches.length === 3) {
+      mimeType = matches[1];
+      b64Data = matches[2];
+    } else if (base64Image.includes(',')) {
+      b64Data = base64Image.split(',')[1];
+    }
+
+    const payloadText = `You are an expert logo designer. I have attached my current logo. Please regenerate it as a clean, modern SVG logo based on this new request: "${editPrompt}". Return ONLY the raw, valid SVG code string and nothing else. Ensure it's responsive (using viewBox) and visually appealing. Do not wrap in markdown tags.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-flash-latest',
+      contents: [
+        { inlineData: { data: b64Data, mimeType: mimeType } },
+        payloadText
+      ]
     });
     console.log("Gemini API response returned (edit-logo)");
 
-    const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
-    if (imageBytes) {
-      res.json({ imageBase64: `data:image/png;base64,${imageBytes}` });
+    const svgCode = response.text?.replace(/```xml/g, '')?.replace(/```svg/g, '')?.replace(/```/g, '')?.trim();
+    if (svgCode && svgCode.startsWith('<svg')) {
+      const base64Svg = Buffer.from(svgCode).toString('base64');
+      res.json({ imageBase64: `data:image/svg+xml;base64,${base64Svg}` });
     } else {
-      res.status(500).json({ error: "No image bytes returned" });
+      res.status(500).json({ error: "No valid SVG returned" });
     }
   } catch (error) {
     console.error("Logo Edit Error:", error);
+    res.status(500).json({ error: "AI service temporarily unavailable" });
+  }
+});
+
+// ----------------------------------------------------
+// 4. POST /api/generate-logo
+// Generates image using a separate Image Generation API
+// ----------------------------------------------------
+app.post("/api/generate-logo", async (req, res) => {
+  try {
+    const { startupName, description, shape, style, theme } = req.body;
+    if (!startupName) return res.status(400).json({ error: "startupName is required" });
+
+    const LOGO_API_KEY = process.env.LOGO_API_KEY;
+    if (!LOGO_API_KEY || LOGO_API_KEY === 'YOUR_NEW_API_KEY_HERE') {
+      console.warn("LOGO_API_KEY is missing or invalid. Please configure it in .env");
+      return res.status(500).json({ error: "Logo Generation API key not configured." });
+    }
+
+    console.log("Separate Image Service API request received (generate-logo)");
+
+    const prompt = `Create a professional startup logo icon.
+Startup concept: ${description || 'tech startup'}
+Logo shape: ${shape || 'Minimal'}
+Style: ${style || 'Modern SaaS'}
+Theme: ${theme || 'Tech'}
+
+Rules:
+Icon only
+No text
+No typography
+No letters
+No background graphics
+White background
+Centered design
+
+Design style:
+Minimal
+Flat vector
+Modern tech brand
+Geometric symbol
+
+The logo must be clean, simple, and usable as a real SaaS company logo, similar to Stripe, Notion, Vercel, Linear, Airbnb.`;
+
+    const logoAi = new GoogleGenAI({ apiKey: LOGO_API_KEY });
+    const response = await logoAi.models.generateImages({
+      model: 'imagen-3.0-generate-002',
+      prompt: prompt,
+      config: {
+        numberOfImages: 3,
+        aspectRatio: '1:1',
+        outputMimeType: 'image/jpeg'
+      }
+    });
+
+    const logos = response.generatedImages.map(img => `data:image/jpeg;base64,${img.image.imageBytes}`);
+    if (logos.length > 0) {
+      res.json({ logos: logos });
+    } else {
+      res.status(500).json({ error: "No images returned" });
+    }
+  } catch (error) {
+    console.error("Logo Generation Error:", error);
     res.status(500).json({ error: "AI service temporarily unavailable" });
   }
 });
