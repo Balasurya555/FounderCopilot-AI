@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard,
   Lightbulb,
@@ -12,6 +12,8 @@ import {
   Plus,
   Send,
   Mic,
+  MicOff,
+  Volume2,
   Play,
   MoreHorizontal,
   ChevronRight,
@@ -30,6 +32,7 @@ import { generateStartupInsights, editLogo, checkHealth } from "../services/gemi
 import { generateLogo } from "../services/logoService";
 import { exportCanvasToExcel } from "../utils/exportToExcel";
 import Community from "./Community";
+import { useVoice } from "../lib/useVoice";
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("Dashboard");
@@ -42,7 +45,6 @@ export default function DashboardPage() {
   const [logoEditPrompt, setLogoEditPrompt] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [isBackendReady, setIsBackendReady] = useState(false);
   const [askedQuestions, setAskedQuestions] = useState<string[]>([]);
   const [primaryColor, setPrimaryColor] = useState("#4F46E5");
@@ -129,6 +131,7 @@ export default function DashboardPage() {
     setMessages(newMessages);
     setInputValue("");
     setIsTyping(true);
+    voice.setProcessing();
 
     try {
       const insights = await generateStartupInsights(newMessages, askedQuestions);
@@ -145,13 +148,14 @@ export default function DashboardPage() {
       };
 
       setMessages(prev => {
+        const isInBrandingStage = insights.design_thinking_stage === "BRANDING";
         const hasAskedLogo = prev.some((m: any) => m.isLogoChoice) || hasUploadedLogo || startupLogo;
         const newMsgs = [...prev, aiMsg];
 
-        if (!hasAskedLogo && insights.startup_name) {
+        if (isInBrandingStage && !hasAskedLogo && insights.startup_name) {
           return [...newMsgs, {
             role: "assistant",
-            content: "Do you already have a logo for your startup, or would you like me to generate one?",
+            content: "Since we're in the Branding stage — do you already have a logo, or would you like me to generate one for you?",
             isLogoChoice: true
           }];
         }
@@ -159,6 +163,10 @@ export default function DashboardPage() {
       });
 
       setStartupData(insights);
+
+      // Voice output: speak the AI response aloud if voice mode is on
+      const spokenText = insights.chat_response || insights.next_question_for_founder || "";
+      if (spokenText) voice.speak(spokenText);
     } catch (error: any) {
       console.error("AI Error:", error);
       setIsTyping(false);
@@ -204,14 +212,21 @@ export default function DashboardPage() {
     }
   };
 
+  // Voice interaction hook
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setInputValue(text);
+    // Auto-send after a short delay so user sees the text
+    setTimeout(() => handleSend(text), 300);
+  }, []);
+
+  const voice = useVoice({ onTranscript: handleVoiceTranscript });
+
   const toggleMic = () => {
-    setIsListening(!isListening);
-    if (!isListening) {
-      setTimeout(() => {
-        setIsListening(false);
-        alert("Voice input simulated: 'Tell me about the market size'");
-        handleSend("Tell me about the market size");
-      }, 2000);
+    if (voice.isSpeaking) {
+      // Interrupt AI speech and start listening
+      voice.interrupt();
+    } else {
+      voice.toggleListening();
     }
   };
 
@@ -248,7 +263,7 @@ export default function DashboardPage() {
     }
   };
 
-  const DESIGN_THINKING_STAGES = ["EMPATHIZE", "DEFINE", "IDEATE", "PROTOTYPE", "TEST", "LAUNCH"];
+  const DESIGN_THINKING_STAGES = ["EMPATHIZE", "DEFINE", "IDEATE", "VALIDATE", "PROTOTYPE", "BRANDING", "LAUNCH"];
 
   const isStageUnlocked = (targetStage: string) => {
     if (!startupData?.design_thinking_stage) return targetStage === "EMPATHIZE";
@@ -259,12 +274,12 @@ export default function DashboardPage() {
 
   const availableNavItems = [
     { icon: LayoutDashboard, label: "Dashboard", requiredStage: "EMPATHIZE" },
-    { icon: Users, label: "Community", requiredStage: "EMPATHIZE" }, // Community should always be visible to see others
+    { icon: Users, label: "Community", requiredStage: "EMPATHIZE" },
     { icon: Lightbulb, label: "Idea Validation", requiredStage: "DEFINE" },
     { icon: Presentation, label: "Pitch Deck", requiredStage: "PROTOTYPE" },
-    { icon: Palette, label: "Branding", requiredStage: "PROTOTYPE" },
-    { icon: Megaphone, label: "Marketing Assets", requiredStage: "PROTOTYPE" },
-    { icon: UserCircle, label: "Investor Mode", requiredStage: "TEST" },
+    { icon: Palette, label: "Branding", requiredStage: "BRANDING" },
+    { icon: Megaphone, label: "Marketing Assets", requiredStage: "BRANDING" },
+    { icon: UserCircle, label: "Investor Mode", requiredStage: "LAUNCH" },
   ].filter(item => isStageUnlocked(item.requiredStage));
 
   return (
@@ -275,7 +290,7 @@ export default function DashboardPage() {
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
             <LayoutDashboard className="w-5 h-5 text-white" />
           </div>
-          <span className="font-bold text-lg tracking-tight">Founder Copilot</span>
+          <span className="font-bold text-lg tracking-tight">Dream2Reality AI</span>
         </div>
 
         <nav className="flex-1 px-4 space-y-1">
@@ -1053,28 +1068,73 @@ export default function DashboardPage() {
             </div>
 
             <div className="p-4 border-t border-slate-100">
+              {/* Voice Mode Toggle + Status */}
+              <div className="flex items-center justify-between mb-2 px-1">
+                <div className="flex items-center gap-2">
+                  {voice.status === "listening" && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-red-500 animate-pulse">
+                      <span className="w-2 h-2 bg-red-500 rounded-full" /> Listening...
+                    </span>
+                  )}
+                  {voice.status === "processing" && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" /> Processing...
+                    </span>
+                  )}
+                  {voice.status === "speaking" && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600">
+                      <Volume2 className="w-3.5 h-3.5 animate-pulse" /> AI speaking...
+                    </span>
+                  )}
+                  {voice.interimText && (
+                    <span className="text-xs text-slate-500 italic truncate max-w-[200px]">
+                      "{voice.interimText}"
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={voice.toggleVoiceMode}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border",
+                    voice.voiceMode
+                      ? "bg-indigo-50 text-indigo-600 border-indigo-200"
+                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                  )}
+                >
+                  {voice.voiceMode ? <Volume2 className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+                  Voice Mode {voice.voiceMode ? "ON" : "OFF"}
+                </button>
+              </div>
+
               <div className="relative">
                 <textarea
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                  placeholder={isListening ? "Listening..." : "Ask your co-founder anything..."}
+                  placeholder={voice.isListening ? "Listening... speak now" : "Ask your innovation mentor anything..."}
                   disabled={!isBackendReady || isTyping || isGeneratingLogo}
                   className={cn(
-                    "w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-12 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none h-24",
-                    isListening && "border-indigo-500 bg-indigo-50/30",
+                    "w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-24 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none h-24",
+                    voice.isListening && "border-red-400 bg-red-50/30 ring-2 ring-red-200",
+                    voice.isSpeaking && "border-indigo-400 bg-indigo-50/30",
                     (!isBackendReady || isTyping || isGeneratingLogo) && "opacity-50 cursor-not-allowed"
                   )}
                 />
                 <div className="absolute bottom-3 right-3 flex items-center gap-2">
                   <button
                     onClick={toggleMic}
+                    disabled={!isBackendReady}
+                    title={voice.isSpeaking ? "Interrupt AI & start talking" : voice.isListening ? "Stop listening" : "Start talking"}
                     className={cn(
-                      "p-2 transition-colors",
-                      isListening ? "text-red-500 animate-pulse" : "text-slate-400 hover:text-indigo-600"
+                      "p-2 rounded-xl transition-all",
+                      voice.isListening
+                        ? "bg-red-500 text-white animate-pulse shadow-lg shadow-red-200"
+                        : voice.isSpeaking
+                          ? "bg-amber-500 text-white"
+                          : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
                     )}
                   >
-                    <Mic className="w-5 h-5" />
+                    {voice.isListening ? <Mic className="w-5 h-5" /> : voice.isSpeaking ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                   </button>
                   <button
                     onClick={() => handleSend()}
