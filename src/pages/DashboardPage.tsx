@@ -569,7 +569,7 @@ export default function DashboardPage() {
                             </div>
                           )}
 
-                          {isStageUnlocked("TEST") && (
+                          {isStageUnlocked("VALIDATE") && (
                             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                               <h3 className="font-bold mb-4">Validation Plan</h3>
                               <div className="space-y-3">
@@ -583,6 +583,55 @@ export default function DashboardPage() {
                                   <h4 className="font-bold text-[10px] text-slate-400 uppercase mb-2">Early Adopters Strategy</h4>
                                   <p className="text-sm font-medium text-slate-800">{startupData.early_adopters_strategy}</p>
                                 </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Revenue Projection Chart */}
+                          {isStageUnlocked("VALIDATE") && startupData.revenue_projection && (
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <h3 className="font-bold mb-4">Revenue Projection</h3>
+                              <div className="space-y-4">
+                                {[
+                                  { year: "Year 1", value: startupData.revenue_projection.year1, color: "bg-indigo-200" },
+                                  { year: "Year 2", value: startupData.revenue_projection.year2, color: "bg-indigo-400" },
+                                  { year: "Year 3", value: startupData.revenue_projection.year3, color: "bg-indigo-600" },
+                                ].map((item, i) => (
+                                  <div key={i}>
+                                    <div className="flex justify-between text-xs font-bold mb-1">
+                                      <span className="text-slate-600">{item.year}</span>
+                                      <span className="text-slate-900">{item.value}</span>
+                                    </div>
+                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                      <div className={cn("h-full rounded-full transition-all", item.color)} style={{ width: `${Math.min(100, 30 + i * 30)}%` }} />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* AI Teammate Suggestions */}
+                          {isStageUnlocked("VALIDATE") && (
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                              <h3 className="font-bold mb-1">Suggested Team Roles</h3>
+                              <p className="text-xs text-slate-500 mb-4">AI-recommended roles to build this startup</p>
+                              <div className="space-y-3">
+                                {[
+                                  { role: "Full-Stack Developer", skill: "React, Node.js, APIs", emoji: "👨‍💻", reason: "Build the MVP and core product" },
+                                  { role: "UI/UX Designer", skill: "Figma, User Research", emoji: "🎨", reason: "Design intuitive user flows" },
+                                  { role: "Growth Marketer", skill: "SEO, Ads, Content", emoji: "📈", reason: "Acquire first 1,000 users" },
+                                  { role: "AI/ML Engineer", skill: "Python, TensorFlow", emoji: "🤖", reason: "Build intelligent features" },
+                                ].map((teammate, i) => (
+                                  <div key={i} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all">
+                                    <span className="text-xl shrink-0">{teammate.emoji}</span>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-bold text-slate-900">{teammate.role}</p>
+                                      <p className="text-[10px] text-slate-500">{teammate.skill} — {teammate.reason}</p>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full shrink-0">Find</span>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           )}
@@ -966,6 +1015,58 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* AI Startup Pitch Summary */}
+                  {isStageUnlocked("PROTOTYPE") && (
+                    <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-8 rounded-3xl text-white shadow-xl shadow-indigo-200 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
+                      <div className="relative z-10">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Sparkles className="w-5 h-5" />
+                          <span className="text-xs font-bold uppercase tracking-widest text-indigo-200">AI-Generated Pitch Summary</span>
+                        </div>
+                        <h3 className="text-2xl font-bold mb-6">{startupData.startup_name}</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div>
+                            <p className="text-xs font-bold text-indigo-200 uppercase mb-1">Problem</p>
+                            <p className="text-sm text-white/90 leading-relaxed">{startupData.problem_statement}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-indigo-200 uppercase mb-1">Solution</p>
+                            <p className="text-sm text-white/90 leading-relaxed">{startupData.idea_summary}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-indigo-200 uppercase mb-1">Target Users</p>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {startupData.target_customers?.slice(0, 4).map((c: string, i: number) => (
+                                <span key={i} className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-bold">{c}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-indigo-200 uppercase mb-1">Unique Value</p>
+                            <p className="text-sm text-white/90 leading-relaxed">{startupData.unique_advantage}</p>
+                          </div>
+                        </div>
+                        <div className="mt-6 pt-4 border-t border-white/20 flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div>
+                              <p className="text-xs text-indigo-200">Market Size</p>
+                              <p className="text-lg font-bold">{startupData.market_size_estimate}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-indigo-200">Year 3 Revenue</p>
+                              <p className="text-lg font-bold">{startupData.revenue_projection?.year3}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-indigo-200">Score</p>
+                              <p className="text-lg font-bold">{startupData.startup_score}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               ) : activeTab === "Community" ? (
                 <div key="community">
@@ -976,22 +1077,34 @@ export default function DashboardPage() {
                   <div className="w-20 h-20 bg-indigo-100 rounded-3xl flex items-center justify-center text-indigo-600 mb-8 animate-pulse">
                     <Lightbulb className="w-10 h-10" />
                   </div>
-                  <h2 className="text-2xl font-bold mb-3">Ready to build?</h2>
+                  <h2 className="text-2xl font-bold mb-3">Turn your dream into reality</h2>
                   <p className="text-slate-500 leading-relaxed">
-                    Tell me your startup idea in the chat, or upload a rough business plan to get started. I'll help you with everything from market research to pitch decks.
+                    Tell me your problem, idea, or dream. I'll guide you step-by-step through Design Thinking — from empathy to launch.
                   </p>
                   <div className="grid grid-cols-2 gap-4 mt-10 w-full">
                     <button
-                      onClick={() => handleSend("I want to build a SaaS for SME logistics")}
+                      onClick={() => handleSend("I want to solve food waste in hostels")}
                       className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
                     >
-                      "I want to build a SaaS for..."
+                      💡 "I want to solve food waste in hostels"
                     </button>
                     <button
-                      onClick={() => handleSend("Validate my idea for a quick commerce logistics startup")}
+                      onClick={() => handleSend("I want to build an AI tool for farmers")}
                       className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
                     >
-                      "Validate my idea for..."
+                      🚀 "I want to build an AI tool for farmers"
+                    </button>
+                    <button
+                      onClick={() => handleSend("Students struggle to find study groups")}
+                      className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
+                    >
+                      🎯 "Students struggle to find study groups"
+                    </button>
+                    <button
+                      onClick={() => handleSend("I have a prototype for a delivery tracking app")}
+                      className="p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold hover:border-indigo-200 hover:bg-indigo-50 transition-all text-left"
+                    >
+                      ⚡ "I have a prototype for a delivery app"
                     </button>
                   </div>
                 </div>
