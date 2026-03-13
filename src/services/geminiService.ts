@@ -2,10 +2,28 @@ const BACKEND_URL = "http://localhost:5000";
 
 export async function checkHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${BACKEND_URL}/health`);
-    return response.ok;
+    const response = await fetch(`${BACKEND_URL}/api/health`);
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.ai === "connected";
   } catch (error) {
     return false;
+  }
+}
+
+export async function sendChatMessage(messages: { role: string; content: string }[]): Promise<string> {
+  try {
+    const response = await fetchWithRetry(`${BACKEND_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    return data.response;
+  } catch (error) {
+    console.error("Chat Error:", error);
+    return "I'm reconnecting to the AI service. Please try again in a moment.";
   }
 }
 

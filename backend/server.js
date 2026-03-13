@@ -24,15 +24,28 @@ const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
 // Ensure API key is configured
 app.use((req, res, next) => {
-  if (!ai && req.path !== "/health") {
+  const healthPaths = ["/health", "/api/health"];
+  if (!ai && !healthPaths.includes(req.path)) {
     return res.status(503).json({ error: "AI service temporarily unavailable - Missing API Key" });
   }
   next();
 });
 
-// Health check endpoint
+// Health check endpoints
 app.get("/health", (req, res) => {
   res.json({ status: "backend_running" });
+});
+
+app.get("/api/health", (req, res) => {
+  if (ai) {
+    res.json({ status: "ok", ai: "connected" });
+  } else {
+    res.status(200).json({
+      status: "ok",
+      ai: "unavailable",
+      error: "GEMINI_API_KEY is missing. Add it to backend/.env and restart the server."
+    });
+  }
 });
 
 // SYSTEM INSTRUCTION FOR STARTUP COPILOT
@@ -140,12 +153,10 @@ const startupSchema = {
 };
 
 // ----------------------------------------------------
-// 1. POST /chat
+// 1. POST /chat  (and /api/chat alias)
 // Endpoint to handle chatbot conversation logic
-// Since our frontend merges standard conversation inside generateStartupInsights, 
-// this is largely handled there, but we implement basic chat if needed standalone
 // ----------------------------------------------------
-app.post("/chat", async (req, res) => {
+async function handleChat(req, res) {
   try {
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages array format" });
@@ -174,9 +185,15 @@ app.post("/chat", async (req, res) => {
     res.json({ response: response.text });
   } catch (error) {
     console.error("Chat API Error:", error.message, error);
-    res.status(500).json({ error: "AI service temporarily unavailable" });
+    res.status(500).json({
+      error: "AI service temporarily unavailable",
+      fallback: "I'm reconnecting to the AI service. Please try again in a moment."
+    });
   }
-});
+}
+
+app.post("/chat", handleChat);
+app.post("/api/chat", handleChat);
 
 // ----------------------------------------------------
 // Helper for similarity checking

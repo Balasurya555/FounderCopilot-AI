@@ -350,6 +350,17 @@ export default function DashboardPage() {
           </div>
         </header>
 
+        {/* AI Service Status Banner */}
+        {!isBackendReady && (
+          <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-8 py-2 flex items-center gap-2 text-amber-700 text-sm font-medium">
+            <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            AI service starting… The chatbot will be ready in a moment.
+          </div>
+        )}
+
         {/* Workspace */}
         <div className="flex-1 flex overflow-hidden">
           {/* Output Panel */}
