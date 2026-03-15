@@ -75,7 +75,12 @@ const startupSchema = {
 };
 
 async function test() {
-    const ai = new GoogleGenAI({ apiKey: "AIzaSyApzkp_LpgpxZHhj6P_u6OFMW2fpr-uG9U" });
+    const key = process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!key) {
+        console.error("Missing OPENAI_API_KEY or GEMINI_API_KEY. Set it in your environment before running tests.");
+        return;
+    }
+    const ai = new GoogleGenAI({ apiKey: key });
     try {
         const chat = ai.chats.create({
             model: "gemini-flash-latest",

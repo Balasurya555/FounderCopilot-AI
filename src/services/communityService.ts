@@ -26,7 +26,7 @@ export interface CommunityPost {
     comments: number;
 }
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 export async function fetchCommunityUsers(): Promise<CommunityUser[]> {
     try {

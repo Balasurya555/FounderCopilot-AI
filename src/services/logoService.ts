@@ -1,4 +1,4 @@
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 export async function generateLogo(startupName: string, description: string, shape: string, style: string, theme: string): Promise<string[] | null> {
     try {

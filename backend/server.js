@@ -1,7 +1,10 @@
 const dotenv = require("dotenv");
 const path = require("path");
 
-// Load local .env variables from the backend folder
+// Load local .env variables.
+// Priority: root .env.local -> root .env -> backend/.env
+dotenv.config({ path: path.join(process.cwd(), ".env.local") });
+dotenv.config({ path: path.join(process.cwd(), ".env") });
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
@@ -11,27 +14,60 @@ const { GoogleGenAI, Type } = require("@google/genai");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+function isUsableKey(value) {
+  if (!value) return false;
+  const normalized = String(value).trim();
+  if (!normalized) return false;
+
+  const placeholders = new Set([
+    "your_openai_key_here",
+    "your_gemini_key_here",
+    "YOUR_NEW_API_KEY_HERE",
+    "YOUR_APP_URL_HERE",
+  ]);
+
+  return !placeholders.has(normalized);
+}
+
+function getFirstUsableKey(...candidates) {
+  for (const candidate of candidates) {
+    if (isUsableKey(candidate)) return String(candidate).trim();
+  }
+  return "";
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini Client
-const API_KEY = process.env.GEMINI_API_KEY || "";
+// Initialize AI client. Prefer OPENAI_API_KEY; fall back to GEMINI_API_KEY if present.
+const API_KEY = getFirstUsableKey(process.env.OPENAI_API_KEY, process.env.GEMINI_API_KEY);
 if (!API_KEY) {
-  console.error("Gemini API key not found in environment variables");
+  console.error("ERROR: OPENAI_API_KEY (or GEMINI_API_KEY) not found in environment variables");
+  console.warn("Tip: Copy .env.example to .env.local and add OPENAI_API_KEY=your_key_here");
 }
 const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
 
-// Ensure API key is configured
+// Ensure API key is configured and fail gracefully for AI routes
 app.use((req, res, next) => {
-  if (!ai && req.path !== "/health") {
-    return res.status(503).json({ error: "AI service temporarily unavailable - Missing API Key" });
+  // Allow health and static endpoints to operate without AI
+  if (req.path === "/health" || req.path === "/api/health") return next();
+
+  if (!API_KEY) {
+    console.error(`Missing OPENAI_API_KEY for request ${req.method} ${req.path}`);
+    return res.status(500).json({ error: "Missing OPENAI_API_KEY. Please add it to your .env.local file." });
   }
+
   next();
 });
 
 // Health check endpoint
 app.get("/health", (req, res) => {
+  res.json({ status: "backend_running" });
+});
+
+// Backward-compatible health route for clients that prefix API routes with /api.
+app.get("/api/health", (req, res) => {
   res.json({ status: "backend_running" });
 });
 
@@ -376,9 +412,9 @@ app.post("/api/generate-logo", async (req, res) => {
     const { startupName, description, shape, style, theme } = req.body;
     if (!startupName) return res.status(400).json({ error: "startupName is required" });
 
-    const LOGO_API_KEY = process.env.LOGO_API_KEY;
-    if (!LOGO_API_KEY || LOGO_API_KEY === 'YOUR_NEW_API_KEY_HERE') {
-      console.warn("LOGO_API_KEY is missing or invalid. Please configure it in .env");
+    const LOGO_API_KEY = getFirstUsableKey(process.env.LOGO_API_KEY, API_KEY);
+    if (!LOGO_API_KEY) {
+      console.warn("LOGO_API_KEY (or GEMINI/OPENAI API key fallback) is missing or invalid.");
       return res.status(500).json({ error: "Logo Generation API key not configured." });
     }
 

@@ -231,7 +231,8 @@ export default function DashboardPage() {
   const handleDeployToCommunity = async () => {
     if (!startupData) return;
     try {
-      await fetch("http://localhost:5000/community/post", {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+      await fetch(`${backendUrl}/community/post`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

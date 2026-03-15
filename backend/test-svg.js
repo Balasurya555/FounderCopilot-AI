@@ -1,7 +1,12 @@
 const { GoogleGenAI } = require("@google/genai");
 
 async function testSVG() {
-    const ai = new GoogleGenAI({ apiKey: "AIzaSyApzkp_LpgpxZHhj6P_u6OFMW2fpr-uG9U" });
+    const key = process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!key) {
+        console.error("Missing OPENAI_API_KEY or GEMINI_API_KEY. Set it in your environment before running tests.");
+        return;
+    }
+    const ai = new GoogleGenAI({ apiKey: key });
     try {
         const prompt = `You are an expert logo designer. Generate a clean, modern SVG logo for a startup named "DataSense". The user requested: "i need a red color logo". 
 Return ONLY the raw, valid SVG code string and nothing else. Ensure it's responsive (using viewBox) and visually appealing. Do not wrap in markdown tags.`;
