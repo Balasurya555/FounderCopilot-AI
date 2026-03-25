@@ -6,6 +6,15 @@ const path = require("path");
 dotenv.config({ path: path.join(process.cwd(), ".env.local") });
 dotenv.config({ path: path.join(process.cwd(), ".env") });
 dotenv.config({ path: path.join(__dirname, ".env") });
+// Fallback to project root .env if keys are missing
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+console.log("Loading environment variables...");
+if (process.env.GEMINI_API_KEY) {
+  console.log("Found GEMINI_API_KEY in environment");
+} else {
+  console.warn("GEMINI_API_KEY not found in environment after loading .env files");
+}
 
 const express = require("express");
 const cors = require("cors");
@@ -47,6 +56,11 @@ if (!API_KEY) {
   console.warn("Tip: Copy .env.example to .env.local and add OPENAI_API_KEY=your_key_here");
 }
 const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null;
+if (ai) {
+  console.log("✅ Gemini AI client initialized");
+} else {
+  console.error("❌ Failed to initialize Gemini AI client");
+}
 
 // Ensure API key is configured and fail gracefully for AI routes
 app.use((req, res, next) => {
